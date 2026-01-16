@@ -2,7 +2,7 @@ use clap::Parser;
 use cli::{Cli, Commands};
 use inquire::{Confirm, Select, Text};
 use std::process;
-use tabled::{Table, Tabled, settings::Style};
+use tabled::{Table, Tabled, settings::{Style, style::HorizontalLine}};
 use chrono::{DateTime, Utc, Local, NaiveDate, NaiveTime, NaiveDateTime, TimeZone};
 use colored::*;
 
@@ -11,7 +11,6 @@ mod cli;
 
 #[derive(Tabled)]
 struct TaskDisplay {
-    id: i64,
     title: String,
     #[tabled(rename = "limit")]
     limit_display: String,
@@ -19,7 +18,6 @@ struct TaskDisplay {
 
 #[derive(Tabled)]
 struct TaskDisplayFull {
-    id: i64,
     #[tabled(rename = "v")]
     is_done: String,
     title: String,
@@ -43,7 +41,7 @@ fn main() {
             let limit_dt = if limit.is_some() {
                 limit.and_then(|s| DateTime::parse_from_rfc3339(&s).ok().map(|dt| dt.with_timezone(&Utc)))
             } else {
-                prompt_limit(None)
+                prompt_limit(None, true)
             };
 
             let description = if description.is_some() {
@@ -63,7 +61,7 @@ fn main() {
                 if let Some(mut task) = db::get_task(&conn, id).unwrap() {
                     task.is_done = true;
                     db::update_task(&conn, &task).unwrap();
-                    println!("Task {} marked as done.\n", id);
+                    println!("Task marked as done.\n");
                 }
             }
         }
@@ -72,12 +70,12 @@ fn main() {
             print_tasks(tasks, all);
             println!();
         }
-        Some(Commands::Delete { id }) => {
+        Some(Commands::Remove { id }) => {
             let id = resolve_id(&conn, id);
             if let Some(id) = id {
-                if Confirm::new("Are you sure you want to delete this task?").with_default(false).prompt().unwrap_or(false) {
+                if Confirm::new("Are you sure you want to remove this task?").with_default(false).prompt().unwrap_or(false) {
                     db::delete_task(&conn, id).unwrap();
-                    println!("Task {} deleted.\n", id);
+                    println!("Task removed.\n");
                 }
             }
         }
@@ -105,7 +103,8 @@ fn main() {
         None => {
             // Interactive mode if no command given
             loop {
-                let options = vec!["List", "Add", "Show", "Done", "Edit", "Delete", "Quit"];
+                // Request order: list, add, done, show, edit, remove, quit
+                let options = vec!["List", "Add", "Done", "Show", "Edit", "Remove", "Quit"];
                 let ans = Select::new("Choose an action:", options).prompt().unwrap_or("Quit");
                 match ans {
                     "List" => {
@@ -116,7 +115,7 @@ fn main() {
                     "Add" => {
                         let title = Text::new("Task title:").prompt().unwrap_or_default();
                         if !title.is_empty() {
-                            let limit = prompt_limit(None);
+                            let limit = prompt_limit(None, true);
                             let description = if Confirm::new("Add a description?").with_default(false).prompt().unwrap_or(false) {
                                 Some(Text::new("Description:").prompt().unwrap_or_default())
                             } else {
@@ -124,6 +123,15 @@ fn main() {
                             };
                             db::add_task(&conn, &title, limit, description).unwrap();
                             println!("Task added.");
+                        }
+                    }
+                    "Done" => {
+                        if let Some(id) = resolve_id(&conn, None) {
+                            if let Some(mut task) = db::get_task(&conn, id).unwrap() {
+                                task.is_done = true;
+                                db::update_task(&conn, &task).unwrap();
+                                println!("Task marked as done.");
+                            }
                         }
                     }
                     "Show" => {
@@ -138,25 +146,16 @@ fn main() {
                             }
                         }
                     }
-                    "Done" => {
-                        if let Some(id) = resolve_id(&conn, None) {
-                            if let Some(mut task) = db::get_task(&conn, id).unwrap() {
-                                task.is_done = true;
-                                db::update_task(&conn, &task).unwrap();
-                                println!("Task {} marked as done.", id);
-                            }
-                        }
-                    }
                     "Edit" => {
                         if let Some(id) = resolve_id(&conn, None) {
                             interactive_edit(&conn, id);
                         }
                     }
-                    "Delete" => {
+                    "Remove" => {
                         if let Some(id) = resolve_id(&conn, None) {
                             if Confirm::new("Are you sure?").with_default(false).prompt().unwrap_or(false) {
                                 db::delete_task(&conn, id).unwrap();
-                                println!("Task {} deleted.", id);
+                                println!("Task removed.");
                             }
                         }
                     }
@@ -172,7 +171,8 @@ fn interactive_edit(conn: &rusqlite::Connection, id: i64) {
     if let Some(mut task) = db::get_task(conn, id).unwrap() {
         task.title = Text::new("Title:").with_default(&task.title).prompt().unwrap_or(task.title);
         if Confirm::new("Edit limit?").with_default(false).prompt().unwrap_or(false) {
-            task.limit = prompt_limit(task.limit);
+            // Pass false here because "Edit limit?" was already confirmed above
+            task.limit = prompt_limit(task.limit, false);
         }
         if Confirm::new("Edit description?").with_default(false).prompt().unwrap_or(false) {
             let current_desc = task.description.clone().unwrap_or_default();
@@ -183,8 +183,8 @@ fn interactive_edit(conn: &rusqlite::Connection, id: i64) {
     }
 }
 
-fn prompt_limit(current: Option<DateTime<Utc>>) -> Option<DateTime<Utc>> {
-    if !Confirm::new("Set/Change a limit?").with_default(false).prompt().unwrap_or(false) {
+fn prompt_limit(current: Option<DateTime<Utc>>, need_confirm: bool) -> Option<DateTime<Utc>> {
+    if need_confirm && !Confirm::new("Set/Change a limit?").with_default(false).prompt().unwrap_or(false) {
         return current;
     }
 
@@ -232,7 +232,6 @@ fn print_tasks(tasks: Vec<db::Task>, show_all: bool) {
     let mut table;
     if show_all {
         let display_tasks: Vec<TaskDisplayFull> = tasks.into_iter().map(|t| TaskDisplayFull {
-            id: t.id,
             is_done: if t.is_done { "v".green().to_string() } else { "-".red().to_string() },
             title: t.title,
             limit_display: format_limit_color(t.limit),
@@ -242,15 +241,14 @@ fn print_tasks(tasks: Vec<db::Task>, show_all: bool) {
         let display_tasks: Vec<TaskDisplay> = tasks.into_iter()
             .filter(|t| !t.is_done)
             .map(|t| TaskDisplay {
-                id: t.id,
                 title: t.title,
                 limit_display: format_limit_color(t.limit),
             }).collect();
         table = Table::new(display_tasks);
     }
     
-    // Apply a light, borderless style
-    table.with(Style::blank());
+    // Header separation line
+    table.with(Style::blank().horizontals([HorizontalLine::new(0, Style::ascii().get_horizontal())]));
     println!("{}", table.to_string());
 }
 
@@ -269,7 +267,7 @@ fn resolve_id(conn: &rusqlite::Connection, id: Option<i64>) -> Option<i64> {
     }
 
     let options: Vec<String> = tasks.iter()
-        .filter(|t| !t.is_done) // Only suggest active tasks
+        .filter(|t| !t.is_done)
         .map(|t| format!("{}: {}", t.id, t.title)).collect();
     
     if options.is_empty() {

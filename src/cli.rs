@@ -28,9 +28,9 @@ pub enum Commands {
         /// Task ID
         id: Option<i64>,
     },
-    /// Delete a task
+    /// Remove a task
     #[command(alias = "r")]
-    Delete {
+    Remove {
         /// Task ID
         id: Option<i64>,
     },
