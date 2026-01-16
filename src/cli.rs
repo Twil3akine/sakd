@@ -22,8 +22,14 @@ pub enum Commands {
         #[arg(short, long)]
         description: Option<String>,
     },
-    /// Delete a task
+    /// Mark a task as done
     #[command(alias = "d")]
+    Done {
+        /// Task ID
+        id: Option<i64>,
+    },
+    /// Delete a task
+    #[command(alias = "r")]
     Delete {
         /// Task ID
         id: Option<i64>,

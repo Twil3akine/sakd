@@ -3,7 +3,7 @@ use cli::{Cli, Commands};
 use inquire::{Confirm, Select, Text};
 use std::process;
 use tabled::{Table, Tabled};
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, Utc, Local, NaiveDate, NaiveTime, NaiveDateTime, TimeZone};
 
 mod db;
 mod cli;
@@ -29,26 +29,42 @@ fn main() {
             let title = title.unwrap_or_else(|| {
                 Text::new("Task title:").prompt().unwrap_or_else(|_| process::exit(0))
             });
-            let limit_dt = limit.and_then(|s| DateTime::parse_from_rfc3339(&s).ok().map(|dt| dt.with_timezone(&Utc)));
+            
+            let limit_dt = if limit.is_some() {
+                limit.and_then(|s| DateTime::parse_from_rfc3339(&s).ok().map(|dt| dt.with_timezone(&Utc)))
+            } else {
+                prompt_limit(None)
+            };
+
+            let description = if description.is_some() {
+                description
+            } else if Confirm::new("Add a description?").with_default(false).prompt().unwrap_or(false) {
+                Some(Text::new("Description:").prompt().unwrap_or_default())
+            } else {
+                None
+            };
             
             db::add_task(&conn, &title, limit_dt, description).unwrap();
             println!("Task added: {}", title);
         }
+        Some(Commands::Done { id }) => {
+            let id = resolve_id(&conn, id);
+            if let Some(id) = id {
+                if let Some(mut task) = db::get_task(&conn, id).unwrap() {
+                    task.is_done = true;
+                    db::update_task(&conn, &task).unwrap();
+                    println!("Task {} marked as done.", id);
+                }
+            }
+        }
         Some(Commands::List { order: _ }) => {
             let tasks = db::get_tasks(&conn).unwrap();
-            let display_tasks: Vec<TaskDisplay> = tasks.into_iter().map(|t| TaskDisplay {
-                id: t.id,
-                title: t.title,
-                is_done: if t.is_done { "v".to_string() } else { " ".to_string() },
-                limit: t.limit.map(|l| l.to_rfc3339()).unwrap_or_default(),
-                description: t.description.unwrap_or_default(),
-            }).collect();
-            println!("{}", Table::new(display_tasks).to_string());
+            print_tasks(tasks);
         }
         Some(Commands::Delete { id }) => {
             let id = resolve_id(&conn, id);
             if let Some(id) = id {
-                if Confirm::new("Are you sure?").with_default(false).prompt().unwrap_or(false) {
+                if Confirm::new("Are you sure you want to delete this task?").with_default(false).prompt().unwrap_or(false) {
                     db::delete_task(&conn, id).unwrap();
                     println!("Task {} deleted.", id);
                 }
@@ -60,9 +76,9 @@ fn main() {
                 if let Some(task) = db::get_task(&conn, id).unwrap() {
                     println!("ID: {}", task.id);
                     println!("Title: {}", task.title);
-                    println!("Done: {}", task.is_done);
-                    println!("Limit: {:?}", task.limit);
-                    println!("Description: {:?}", task.description);
+                    println!("Done: {}", if task.is_done { "Yes" } else { "No" });
+                    println!("Limit: {}", task.limit.map(|l| l.with_timezone(&Local).to_rfc3339()).unwrap_or_else(|| "None".to_string()));
+                    println!("Description: {}", task.description.unwrap_or_else(|| "None".to_string()));
                 }
             }
         }
@@ -70,8 +86,17 @@ fn main() {
             let id = resolve_id(&conn, id);
             if let Some(id) = id {
                 if let Some(mut task) = db::get_task(&conn, id).unwrap() {
-                    task.title = Text::new("Title:").with_default(&task.title).prompt().unwrap();
-                    task.is_done = Confirm::new("Completed?").with_default(task.is_done).prompt().unwrap();
+                    task.title = Text::new("Title:").with_default(&task.title).prompt().unwrap_or(task.title);
+                    
+                    if Confirm::new("Edit limit?").with_default(false).prompt().unwrap_or(false) {
+                        task.limit = prompt_limit(task.limit);
+                    }
+
+                    if Confirm::new("Edit description?").with_default(false).prompt().unwrap_or(false) {
+                        let current_desc = task.description.clone().unwrap_or_default();
+                        task.description = Some(Text::new("Description:").with_default(&current_desc).prompt().unwrap_or(current_desc));
+                    }
+
                     db::update_task(&conn, &task).unwrap();
                     println!("Task {} updated.", id);
                 }
@@ -79,29 +104,105 @@ fn main() {
         }
         None => {
             // Interactive mode if no command given
-            let options = vec!["List", "Add", "Quit"];
-            let ans = Select::new("Choose an action:", options).prompt().unwrap();
-            match ans {
-                "List" => {
-                    let tasks = db::get_tasks(&conn).unwrap();
-                    let display_tasks: Vec<TaskDisplay> = tasks.into_iter().map(|t| TaskDisplay {
-                        id: t.id,
-                        title: t.title,
-                        is_done: if t.is_done { "v".to_string() } else { " ".to_string() },
-                        limit: t.limit.map(|l| l.to_rfc3339()).unwrap_or_default(),
-                        description: t.description.unwrap_or_default(),
-                    }).collect();
-                    println!("{}", Table::new(display_tasks).to_string());
+            loop {
+                let options = vec!["List", "Add", "Done", "Edit", "Delete", "Quit"];
+                let ans = Select::new("Choose an action:", options).prompt().unwrap_or("Quit");
+                match ans {
+                    "List" => {
+                        let tasks = db::get_tasks(&conn).unwrap();
+                        print_tasks(tasks);
+                    }
+                    "Add" => {
+                        let title = Text::new("Task title:").prompt().unwrap_or_default();
+                        if !title.is_empty() {
+                            let limit = prompt_limit(None);
+                            let description = if Confirm::new("Add a description?").with_default(false).prompt().unwrap_or(false) {
+                                Some(Text::new("Description:").prompt().unwrap_or_default())
+                            } else {
+                                None
+                            };
+                            db::add_task(&conn, &title, limit, description).unwrap();
+                            println!("Task added.");
+                        }
+                    }
+                    "Done" => {
+                        if let Some(id) = resolve_id(&conn, None) {
+                            if let Some(mut task) = db::get_task(&conn, id).unwrap() {
+                                task.is_done = true;
+                                db::update_task(&conn, &task).unwrap();
+                                println!("Task {} marked as done.", id);
+                            }
+                        }
+                    }
+                    "Edit" => {
+                        if let Some(id) = resolve_id(&conn, None) {
+                            if let Some(mut task) = db::get_task(&conn, id).unwrap() {
+                                task.title = Text::new("Title:").with_default(&task.title).prompt().unwrap_or(task.title);
+                                if Confirm::new("Edit limit?").with_default(false).prompt().unwrap_or(false) {
+                                    task.limit = prompt_limit(task.limit);
+                                }
+                                if Confirm::new("Edit description?").with_default(false).prompt().unwrap_or(false) {
+                                    let current_desc = task.description.clone().unwrap_or_default();
+                                    task.description = Some(Text::new("Description:").with_default(&current_desc).prompt().unwrap_or(current_desc));
+                                }
+                                db::update_task(&conn, &task).unwrap();
+                                println!("Task updated.");
+                            }
+                        }
+                    }
+                    "Delete" => {
+                        if let Some(id) = resolve_id(&conn, None) {
+                            if Confirm::new("Are you sure?").with_default(false).prompt().unwrap_or(false) {
+                                db::delete_task(&conn, id).unwrap();
+                                println!("Task {} deleted.", id);
+                            }
+                        }
+                    }
+                    _ => break,
                 }
-                "Add" => {
-                    let title = Text::new("Task title:").prompt().unwrap();
-                    db::add_task(&conn, &title, None, None).unwrap();
-                    println!("Task added.");
-                }
-                _ => process::exit(0),
             }
         }
     }
+}
+
+fn prompt_limit(current: Option<DateTime<Utc>>) -> Option<DateTime<Utc>> {
+    if !Confirm::new("Set/Change a limit?").with_default(false).prompt().unwrap_or(false) {
+        return current;
+    }
+
+    let date_str = Text::new("Date (YYYY-MM-DD):")
+        .with_default(&Local::now().format("%Y-%m-%d").to_string())
+        .prompt()
+        .ok()?;
+    
+    let date = NaiveDate::parse_from_str(&date_str, "%Y-%m-%d").ok()?;
+
+    if Confirm::new("Set a specific time?").with_default(false).prompt().unwrap_or(false) {
+        let time_str = Text::new("Time (HH:MM):")
+            .with_default("12:00")
+            .prompt()
+            .ok()?;
+        let time = NaiveTime::parse_from_str(&time_str, "%H:%M").ok()?;
+        let dt = NaiveDateTime::new(date, time);
+        // Convert local to UTC
+        Local.from_local_datetime(&dt).single().map(|dt| dt.with_timezone(&Utc))
+    } else {
+        // Just the date, set to end of day or start of day? Let's say 23:59:59
+        let time = NaiveTime::from_hms_opt(23, 59, 59)?;
+        let dt = NaiveDateTime::new(date, time);
+        Local.from_local_datetime(&dt).single().map(|dt| dt.with_timezone(&Utc))
+    }
+}
+
+fn print_tasks(tasks: Vec<db::Task>) {
+    let display_tasks: Vec<TaskDisplay> = tasks.into_iter().map(|t| TaskDisplay {
+        id: t.id,
+        title: t.title,
+        is_done: if t.is_done { "v".to_string() } else { " ".to_string() },
+        limit: t.limit.map(|l| l.with_timezone(&Local).format("%Y-%m-%d %H:%M").to_string()).unwrap_or_default(),
+        description: t.description.unwrap_or_default(),
+    }).collect();
+    println!("{}", Table::new(display_tasks).to_string());
 }
 
 fn resolve_id(conn: &rusqlite::Connection, id: Option<i64>) -> Option<i64> {

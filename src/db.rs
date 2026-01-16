@@ -13,7 +13,7 @@ pub fn init_db() -> Result<Connection> {
     let conn = Connection::open("td.db")?;
     conn.execute(
         "CREATE TABLE IF NOT EXISTS tasks (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            id INTEGER PRIMARY KEY,
             title TEXT NOT NULL,
             is_done BOOLEAN NOT NULL DEFAULT 0,
             limit_at TEXT,
