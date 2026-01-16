@@ -2,7 +2,7 @@ use clap::Parser;
 use cli::{Cli, Commands};
 use inquire::{Confirm, Select, Text};
 use std::process;
-use tabled::{Table, Tabled, settings::{Style, style::HorizontalLine}};
+use tabled::{Table, Tabled, settings::Style};
 use chrono::{DateTime, Utc, Local, NaiveDate, NaiveTime, NaiveDateTime, TimeZone};
 use colored::*;
 
@@ -103,7 +103,7 @@ fn main() {
         None => {
             // Interactive mode if no command given
             loop {
-                // Request order: list, add, done, show, edit, remove, quit
+                // Request order: List, Add, Done, Show, Edit, Remove, Quit
                 let options = vec!["List", "Add", "Done", "Show", "Edit", "Remove", "Quit"];
                 let ans = Select::new("Choose an action:", options).prompt().unwrap_or("Quit");
                 match ans {
@@ -229,14 +229,28 @@ fn format_limit_color(limit: Option<DateTime<Utc>>) -> String {
 }
 
 fn print_tasks(tasks: Vec<db::Task>, show_all: bool) {
-    let mut table;
     if show_all {
         let display_tasks: Vec<TaskDisplayFull> = tasks.into_iter().map(|t| TaskDisplayFull {
             is_done: if t.is_done { "v".green().to_string() } else { "-".red().to_string() },
             title: t.title,
             limit_display: format_limit_color(t.limit),
         }).collect();
-        table = Table::new(display_tasks);
+        let mut table = Table::new(display_tasks);
+        table.with(Style::blank());
+        
+        let table_str = table.to_string();
+        let lines: Vec<&str> = table_str.lines().collect();
+        if lines.len() > 1 {
+            let header_len = lines[0].len();
+            let separator = "-".repeat(header_len);
+            println!("{}", lines[0]);
+            println!("{}", separator);
+            for line in lines.iter().skip(1) {
+                println!("{}", line);
+            }
+        } else {
+            println!("{}", table_str);
+        }
     } else {
         let display_tasks: Vec<TaskDisplay> = tasks.into_iter()
             .filter(|t| !t.is_done)
@@ -244,12 +258,23 @@ fn print_tasks(tasks: Vec<db::Task>, show_all: bool) {
                 title: t.title,
                 limit_display: format_limit_color(t.limit),
             }).collect();
-        table = Table::new(display_tasks);
+        let mut table = Table::new(display_tasks);
+        table.with(Style::blank());
+        
+        let table_str = table.to_string();
+        let lines: Vec<&str> = table_str.lines().collect();
+        if lines.len() > 1 {
+            let header_len = lines[0].len();
+            let separator = "-".repeat(header_len);
+            println!("{}", lines[0]);
+            println!("{}", separator);
+            for line in lines.iter().skip(1) {
+                println!("{}", line);
+            }
+        } else {
+            println!("{}", table_str);
+        }
     }
-    
-    // Header separation line
-    table.with(Style::blank().horizontals([HorizontalLine::new(0, Style::ascii().get_horizontal())]));
-    println!("{}", table.to_string());
 }
 
 fn resolve_id(conn: &rusqlite::Connection, id: Option<i64>) -> Option<i64> {
