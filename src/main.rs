@@ -199,15 +199,25 @@ fn format_limit_color(limit: Option<DateTime<Utc>>) -> String {
             let now = Utc::now();
             let local_l = l.with_timezone(&Local);
             let s = local_l.format("%Y-%m-%d %H:%M").to_string();
+            
             if l < now {
-                s.red().to_string()
+                // Overdue: Bright Magenta and Bold
+                s.magenta().bold().to_string()
             } else if l < now + chrono::Duration::days(1) {
+                // Today: Red
+                s.red().to_string()
+            } else if l < now + chrono::Duration::days(3) {
+                // Within 3 days: Yellow
                 s.yellow().to_string()
-            } else {
+            } else if l < now + chrono::Duration::days(7) {
+                // Within 1 week: Green
                 s.green().to_string()
+            } else {
+                // Beyond 1 week: Grey (using bright_black for grey)
+                s.bright_black().to_string()
             }
         }
-        None => "None".to_string(),
+        None => "None".bright_black().to_string(),
     }
 }
 
