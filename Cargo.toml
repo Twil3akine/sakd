@@ -9,3 +9,4 @@ rusqlite = { version = "0.31", features = ["bundled"] }
 chrono = { version = "0.4", features = ["serde"] }
 inquire = "0.7"
 tabled = "0.15"
+colored = "2.1"
