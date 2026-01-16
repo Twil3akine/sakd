@@ -37,6 +37,9 @@ pub enum Commands {
     /// List all tasks
     #[command(alias = "l")]
     List {
+        /// Show all tasks including completed ones
+        #[arg(short, long)]
+        all: bool,
         /// Order by (name, limit, etc.)
         #[arg(short, long)]
         order: Option<String>,
