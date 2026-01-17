@@ -2,6 +2,12 @@
 name = "sakd"
 version = "0.1.0"
 edition = "2024"
+description = "Fastest, most useful CLI task manager"
+license = "MIT"
+readme = "README.md"
+repository = "https://github.com/twil3akine/sakd"
+keywords = ["todo", "task", "cli", "sqlite"]
+categories = ["command-line-utilities"]
 
 [dependencies]
 clap = { version = "4.4", features = ["derive"] }
