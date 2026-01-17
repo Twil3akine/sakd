@@ -622,6 +622,20 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b39cdef0fa800fc44525c84ccb54a029961a8215f9619753635a9c0d2538d46d"
 
 [[package]]
+name = "sakd"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "clap",
+ "colored",
+ "dirs",
+ "inquire",
+ "rusqlite",
+ "tabled",
+ "unicode-width",
+]
+
+[[package]]
 name = "scopeguard"
 version = "1.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -749,20 +763,6 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 1.0.109",
-]
-
-[[package]]
-name = "td"
-version = "0.1.0"
-dependencies = [
- "chrono",
- "clap",
- "colored",
- "dirs",
- "inquire",
- "rusqlite",
- "tabled",
- "unicode-width",
 ]
 
 [[package]]

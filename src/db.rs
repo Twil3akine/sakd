@@ -13,11 +13,11 @@ pub struct Task {
 
 fn get_db_path() -> PathBuf {
     let mut path = dirs::data_local_dir().expect("Could not find local data directory");
-    path.push("td");
+    path.push("sakd");
     if !path.exists() {
         fs::create_dir_all(&path).expect("Could not create data directory");
     }
-    path.push("td.db");
+    path.push("sakd.db");
     path
 }
 

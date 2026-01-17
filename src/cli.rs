@@ -1,7 +1,7 @@
 use clap::{Parser, Subcommand};
 
 #[derive(Parser)]
-#[command(name = "td")]
+#[command(name = "sakd")]
 #[command(about = "Fastest, most useful CLI task manager", long_about = None)]
 pub struct Cli {
     #[command(subcommand)]

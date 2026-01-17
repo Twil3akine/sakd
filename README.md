@@ -1,4 +1,4 @@
-# td (Task Done)
+# sakd (Sakkuri Done)
 
 最速・便利・美しい、Rust製のCLIタスクマネージャー。
 
@@ -10,7 +10,7 @@
   - 期限の状態に応じた5段階のカラー表示。
   - ANSIカラーコードによるレイアウト崩れのない、整然としたカラム表示。
 - **強力なインタラクティブモード**: 
-  - `td` 単体で起動し、対話形式でタスクを追加・編集・完了・削除可能。
+  - `sakd` 単体で起動し、対話形式でタスクを追加・編集・完了・削除可能。
   - 項目選択や確認プロンプトによるスムーズなUX。
 - **柔軟な期限管理**: 日付のみ、または時刻指定を含めた期限設定が可能。
 
@@ -23,7 +23,7 @@ cargo build --release
 ```
 
 ### パスの設定
-ビルド後、生成されたバイナリ `target/release/td` をシステムのパスが通ったディレクトリに配置するか、エイリアスを設定することで `td` コマンドとして利用可能になります。
+ビルド後、生成されたバイナリ `target/release/sakd` をシステムのパスが通ったディレクトリに配置するか、エイリアスを設定することで `sakd` コマンドとして利用可能になります。
 
 例（PowerShellの場合）:
 ```powershell
@@ -35,53 +35,53 @@ $env:Path += ";C:\path\to\td\target\release"
 ### インタラクティブモード
 引数なしで実行すると、メニューが表示されます。
 ```bash
-td
+sakd
 ```
 
 ### コマンドライン実行
 
 - **タスクの追加**
   ```bash
-  td add "タスク名"
+  sakd add "タスク名"
   # alias: a
-  td a "タスク名"
+  sakd a "タスク名"
   ```
 
 - **タスクの一覧表示**
   ```bash
-  td list
+  sakd list
   # alias: l
-  td l
+  sakd l
   # 完了済みも含める場合
-  td l --all
+  sakd l --all
   ```
 
 - **タスクを完了にする**
   ```bash
-  td done [ID]
+  sakd done [ID]
   # alias: d
-  td d [ID]
+  sakd d [ID]
   ```
 
 - **タスクの表示**
   ```bash
-  td show [ID]
+  sakd show [ID]
   # alias: s
-  td s [ID]
+  sakd s [ID]
   ```
 
 - **タスクの編集**
   ```bash
-  td edit [ID]
+  sakd edit [ID]
   # alias: e
-  td e [ID]
+  sakd e [ID]
   ```
 
 - **タスクの削除**
   ```bash
-  td remove [ID]
+  sakd remove [ID]
   # alias: r
-  td rm [ID]
+  sakd rm [ID]
   ```
 
 ## ライセンス
