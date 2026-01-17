@@ -81,7 +81,7 @@ sakd
   ```bash
   sakd remove [ID]
   # alias: r
-  sakd rm [ID]
+  sakd r [ID]
   ```
 
 ## ライセンス
