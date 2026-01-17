@@ -1,5 +1,7 @@
 use rusqlite::{params, Connection, Result};
 use chrono::{DateTime, Utc};
+use std::fs;
+use std::path::PathBuf;
 
 pub struct Task {
     pub id: i64,
@@ -9,8 +11,19 @@ pub struct Task {
     pub description: Option<String>,
 }
 
+fn get_db_path() -> PathBuf {
+    let mut path = dirs::data_local_dir().expect("Could not find local data directory");
+    path.push("td");
+    if !path.exists() {
+        fs::create_dir_all(&path).expect("Could not create data directory");
+    }
+    path.push("td.db");
+    path
+}
+
 pub fn init_db() -> Result<Connection> {
-    let conn = Connection::open("td.db")?;
+    let db_path = get_db_path();
+    let conn = Connection::open(db_path)?;
     conn.execute(
         "CREATE TABLE IF NOT EXISTS tasks (
             id INTEGER PRIMARY KEY,

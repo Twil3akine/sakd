@@ -1,2 +1,4 @@
 /target
 td.db
+*.md
+!README.md

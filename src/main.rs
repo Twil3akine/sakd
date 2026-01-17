@@ -4,6 +4,7 @@ use inquire::{Confirm, Select, Text};
 use std::process;
 use chrono::{DateTime, Utc, Local, NaiveDate, NaiveTime, NaiveDateTime, TimeZone};
 use colored::*;
+use unicode_width::UnicodeWidthStr;
 
 mod db;
 mod cli;
@@ -221,21 +222,30 @@ fn format_limit_color(limit: Option<DateTime<Utc>>) -> String {
     }
 }
 
+fn pad_title(title: &str, width: usize) -> String {
+    let title_width = title.width();
+    if title_width >= width {
+        title.to_string()
+    } else {
+        format!("{}{}", title, " ".repeat(width - title_width))
+    }
+}
+
 fn print_tasks(tasks: Vec<db::Task>, show_all: bool) {
     if show_all {
-        println!("  v    {:<25}  {}", "title", "limit");
+        println!("  v    {}  {}", pad_title("title", 25), "limit");
         println!("--------------------------------------------------");
         for t in tasks {
             let status = if t.is_done { "v".green() } else { "-".red() };
             let limit = format_limit_color(t.limit);
-            println!("  {}    {:<25}  {}", status, t.title, limit);
+            println!("  {}    {}  {}", status, pad_title(&t.title, 25), limit);
         }
     } else {
-        println!("  {:<25}  {}", "title", "limit");
+        println!("  {}  {}", pad_title("title", 25), "limit");
         println!("--------------------------------------------------");
         for t in tasks.into_iter().filter(|t| !t.is_done) {
             let limit = format_limit_color(t.limit);
-            println!("  {:<25}  {}", t.title, limit);
+            println!("  {}  {}", pad_title(&t.title, 25), limit);
         }
     }
 }
