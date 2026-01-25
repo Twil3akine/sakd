@@ -17,8 +17,8 @@
 ## インストール
 
 ```bash
-git clone <repository-url>
-cd td
+git clone https://github.com/twil3/sakd.git
+cd sakd
 cargo build --release
 ```
 
@@ -27,7 +27,7 @@ cargo build --release
 
 例（PowerShellの場合）:
 ```powershell
-$env:Path += ";C:\path\to\td\target\release"
+$env:Path += ";C:\path\to\sakd\target\release"
 ```
 
 ## 使い方
