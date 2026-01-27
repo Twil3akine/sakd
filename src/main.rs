@@ -25,15 +25,14 @@ fn main() {
             let limit_dt = if limit.is_some() {
                 limit.and_then(|s| DateTime::parse_from_rfc3339(&s).ok().map(|dt| dt.with_timezone(&Utc)))
             } else {
-                prompt_limit(None, true)
+                prompt_limit(None)
             };
 
             let description = if description.is_some() {
                 description
-            } else if Confirm::new("Add a description?").with_default(false).prompt().unwrap_or(false) {
-                Some(Text::new("Description:").prompt().unwrap_or_default())
             } else {
-                None
+                let desc = Text::new("Description:").prompt().unwrap_or_default();
+                if desc.is_empty() { None } else { Some(desc) }
             };
             
             db::add_task(&conn, &title, limit_dt, description).unwrap();
@@ -99,12 +98,9 @@ fn main() {
                     "Add" => {
                         let title = Text::new("Task title:").prompt().unwrap_or_default();
                         if !title.is_empty() {
-                            let limit = prompt_limit(None, true);
-                            let description = if Confirm::new("Add a description?").with_default(false).prompt().unwrap_or(false) {
-                                Some(Text::new("Description:").prompt().unwrap_or_default())
-                            } else {
-                                None
-                            };
+                            let limit = prompt_limit(None);
+                            let desc = Text::new("Description:").prompt().unwrap_or_default();
+                            let description = if desc.is_empty() { None } else { Some(desc) };
                             db::add_task(&conn, &title, limit, description).unwrap();
                             println!("Task added.");
                         }
@@ -154,44 +150,125 @@ fn main() {
 fn interactive_edit(conn: &rusqlite::Connection, id: i64) {
     if let Some(mut task) = db::get_task(conn, id).unwrap() {
         task.title = Text::new("Title:").with_default(&task.title).prompt().unwrap_or(task.title);
-        if Confirm::new("Edit limit?").with_default(false).prompt().unwrap_or(false) {
-            // Pass false here because "Edit limit?" was already confirmed above
-            task.limit = prompt_limit(task.limit, false);
-        }
-        if Confirm::new("Edit description?").with_default(false).prompt().unwrap_or(false) {
-            let current_desc = task.description.clone().unwrap_or_default();
-            task.description = Some(Text::new("Description:").with_default(&current_desc).prompt().unwrap_or(current_desc));
-        }
+        
+        task.limit = prompt_limit(task.limit);
+        
+        let current_desc = task.description.clone().unwrap_or_default();
+        let desc = Text::new("Description:").with_default(&current_desc).prompt().unwrap_or(current_desc);
+        task.description = if desc.is_empty() { None } else { Some(desc) };
+
         db::update_task(conn, &task).unwrap();
         println!("Task updated.");
     }
 }
 
-fn prompt_limit(current: Option<DateTime<Utc>>, need_confirm: bool) -> Option<DateTime<Utc>> {
-    if need_confirm && !Confirm::new("Set/Change a limit?").with_default(false).prompt().unwrap_or(false) {
-        return current;
-    }
+fn prompt_limit(current: Option<DateTime<Utc>>) -> Option<DateTime<Utc>> {
+    let current_local = current.map(|c| c.with_timezone(&Local));
+    let now = Local::now();
+    let default_date = current_local
+        .map(|c| c.format("%Y-%m-%d").to_string())
+        .unwrap_or_else(|| now.format("%Y-%m-%d").to_string());
 
-    let date_str = Text::new("Date (YYYY-MM-DD):")
-        .with_default(&Local::now().format("%Y-%m-%d").to_string())
+    let date_str = Text::new("Date (YYYY-MM-DD/Shortcut):")
+        .with_help_message("Shortcuts: t (today), tm (tomorrow), 2d, 1w, mon-sun")
+        .with_default(&default_date)
         .prompt()
         .ok()?;
     
-    let date = NaiveDate::parse_from_str(&date_str, "%Y-%m-%d").ok()?;
-
-    if Confirm::new("Set a specific time?").with_default(false).prompt().unwrap_or(false) {
-        let time_str = Text::new("Time (HH:MM):")
-            .with_default("12:00")
-            .prompt()
-            .ok()?;
-        let time = NaiveTime::parse_from_str(&time_str, "%H:%M").ok()?;
-        let dt = NaiveDateTime::new(date, time);
-        Local.from_local_datetime(&dt).single().map(|dt| dt.with_timezone(&Utc))
-    } else {
-        let time = NaiveTime::from_hms_opt(23, 59, 59).unwrap();
-        let dt = NaiveDateTime::new(date, time);
-        Local.from_local_datetime(&dt).single().map(|dt| dt.with_timezone(&Utc))
+    if date_str.trim().is_empty() {
+        return None;
     }
+
+    let date = parse_shortcut_date(&date_str).or_else(|| NaiveDate::parse_from_str(&date_str, "%Y-%m-%d").ok())?;
+
+    let default_time = current_local
+        .map(|c| c.format("%H:%M").to_string())
+        .unwrap_or_else(|| "23:59".to_string());
+
+    let time_str = Text::new("Time (HH:MM/Shortcut):")
+        .with_help_message("Shortcuts: last (23:59), morning (09:00), noon (12:00), 1h")
+        .with_default(&default_time)
+        .prompt()
+        .ok()?;
+
+    let time = if time_str.trim().is_empty() {
+        NaiveTime::from_hms_opt(23, 59, 0).unwrap()
+    } else {
+        parse_shortcut_time(&time_str).or_else(|| NaiveTime::parse_from_str(&time_str, "%H:%M").ok())
+            .unwrap_or_else(|| NaiveTime::from_hms_opt(23, 59, 0).unwrap())
+    };
+
+    let dt = NaiveDateTime::new(date, time);
+    Local.from_local_datetime(&dt).single().map(|dt| dt.with_timezone(&Utc))
+}
+
+fn parse_shortcut_date(s: &str) -> Option<NaiveDate> {
+    let s = s.to_lowercase();
+    let now = Local::now().date_naive();
+    
+    match s.as_str() {
+        "today" | "t" => return Some(now),
+        "tomorrow" | "tm" => return Some(now + chrono::Duration::days(1)),
+        _ => {}
+    }
+
+    // [N]d, [N]w
+    if s.ends_with('d') {
+        if let Ok(n) = s[..s.len()-1].parse::<i64>() {
+            return Some(now + chrono::Duration::days(n));
+        }
+    }
+    if s.ends_with('w') {
+        if let Ok(n) = s[..s.len()-1].parse::<i64>() {
+            return Some(now + chrono::Duration::days(n * 7));
+        }
+    }
+
+    // mon, tue, wed, thu, fri, sat, sun
+    let target_weekday = match s.as_str() {
+        "mon" => Some(chrono::Weekday::Mon),
+        "tue" => Some(chrono::Weekday::Tue),
+        "wed" => Some(chrono::Weekday::Wed),
+        "thu" => Some(chrono::Weekday::Thu),
+        "fri" => Some(chrono::Weekday::Fri),
+        "sat" => Some(chrono::Weekday::Sat),
+        "sun" => Some(chrono::Weekday::Sun),
+        _ => None,
+    };
+
+    if let Some(target) = target_weekday {
+        let mut date = now + chrono::Duration::days(1);
+        use chrono::Datelike;
+        while date.weekday() != target {
+            date += chrono::Duration::days(1);
+        }
+        return Some(date);
+    }
+
+    None
+}
+
+fn parse_shortcut_time(s: &str) -> Option<NaiveTime> {
+    let s = s.to_lowercase();
+    match s.as_str() {
+        "last" => return Some(NaiveTime::from_hms_opt(23, 59, 0).unwrap()),
+        "morning" => return Some(NaiveTime::from_hms_opt(9, 0, 0).unwrap()),
+        "noon" => return Some(NaiveTime::from_hms_opt(12, 0, 0).unwrap()),
+        "evening" => return Some(NaiveTime::from_hms_opt(18, 0, 0).unwrap()),
+        "night" => return Some(NaiveTime::from_hms_opt(21, 0, 0).unwrap()),
+        _ => {}
+    }
+
+    // [N]h
+    if s.ends_with('h') {
+        if let Ok(n) = s[..s.len()-1].parse::<i64>() {
+            let now = Local::now();
+            let target = now + chrono::Duration::hours(n);
+            return Some(target.time());
+        }
+    }
+
+    None
 }
 
 fn format_limit_color(limit: Option<DateTime<Utc>>) -> String {
