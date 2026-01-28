@@ -89,12 +89,6 @@ fn main() {
             loop {
                 match tui::run_tui(&conn).expect("TUI error") {
                     tui::TuiEvent::Quit => break,
-                    tui::TuiEvent::Edit(id) => {
-                        interactive_edit(&conn, id);
-                    }
-                    tui::TuiEvent::Add => {
-                        interactive_add(&conn);
-                    }
                 }
             }
         }
@@ -143,15 +137,8 @@ fn main() {
                         loop {
                             match tui::run_tui(&conn).expect("TUI error") {
                                 tui::TuiEvent::Quit => break,
-                                tui::TuiEvent::Edit(id) => {
-                                    interactive_edit(&conn, id);
-                                }
-                                tui::TuiEvent::Add => {
-                                    interactive_add(&conn);
-                                }
                             }
                         }
-                        break;
                     }
                     "Remove" => {
                         if let Some(id) = resolve_id(&conn, None) {

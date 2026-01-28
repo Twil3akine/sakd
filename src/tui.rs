@@ -15,9 +15,38 @@ use rusqlite::Connection;
 use std::io;
 
 use crate::db::{self, Task};
+use crate::utils;
+
+#[derive(Clone, Copy, PartialEq)]
+pub enum PopupStep {
+    Title,
+    Date,
+    Time,
+    Description,
+}
 
 pub enum InputMode {
     Normal,
+    Adding(PopupStep),
+    Editing(i64, PopupStep),
+}
+
+pub struct PopupData {
+    pub title: String,
+    pub date: String,
+    pub time: String,
+    pub description: String,
+}
+
+impl Default for PopupData {
+    fn default() -> Self {
+        Self {
+            title: String::new(),
+            date: String::new(),
+            time: String::new(),
+            description: String::new(),
+        }
+    }
 }
 
 pub struct App<'a> {
@@ -25,6 +54,8 @@ pub struct App<'a> {
     pub filtered_tasks: Vec<Task>,
     pub state: ListState,
     pub input_mode: InputMode,
+    pub input_buffer: String,
+    pub popup_data: PopupData,
     pub show_done: bool,
     pub conn: &'a Connection,
 }
@@ -37,6 +68,8 @@ impl<'a> App<'a> {
             filtered_tasks: Vec::new(),
             state: ListState::default(),
             input_mode: InputMode::Normal,
+            input_buffer: String::new(),
+            popup_data: PopupData::default(),
             show_done: false,
             conn,
         };
@@ -127,6 +160,104 @@ impl<'a> App<'a> {
         Ok(())
     }
 
+    pub fn start_add_popup(&mut self) {
+        self.popup_data = PopupData {
+            title: String::new(),
+            date: chrono::Local::now().format("%Y-%m-%d").to_string(),
+            time: "23:59".to_string(),
+            description: String::new(),
+        };
+        self.input_buffer.clear();
+        self.input_mode = InputMode::Adding(PopupStep::Title);
+    }
+
+    pub fn start_edit_popup(&mut self) {
+        if let Some(i) = self.state.selected() {
+            let task = &self.filtered_tasks[i];
+            self.popup_data = PopupData {
+                title: task.title.clone(),
+                date: task.limit.map(|l| l.with_timezone(&chrono::Local).format("%Y-%m-%d").to_string())
+                    .unwrap_or_else(|| chrono::Local::now().format("%Y-%m-%d").to_string()),
+                time: task.limit.map(|l| l.with_timezone(&chrono::Local).format("%H:%M").to_string())
+                    .unwrap_or_else(|| "23:59".to_string()),
+                description: task.description.clone().unwrap_or_default(),
+            };
+            self.input_buffer = self.popup_data.title.clone();
+            self.input_mode = InputMode::Editing(task.id, PopupStep::Title);
+        }
+    }
+
+    pub fn next_popup_step(&mut self) -> Result<()> {
+        let (next_step, is_done) = match &self.input_mode {
+            InputMode::Adding(step) | InputMode::Editing(_, step) => match step {
+                PopupStep::Title => {
+                    self.popup_data.title = self.input_buffer.clone();
+                    (PopupStep::Date, false)
+                }
+                PopupStep::Date => {
+                    self.popup_data.date = self.input_buffer.clone();
+                    (PopupStep::Time, false)
+                }
+                PopupStep::Time => {
+                    self.popup_data.time = self.input_buffer.clone();
+                    (PopupStep::Description, false)
+                }
+                PopupStep::Description => {
+                    self.popup_data.description = self.input_buffer.clone();
+                    (PopupStep::Description, true)
+                }
+            },
+            _ => return Ok(()),
+        };
+
+        if is_done {
+            self.save_popup()?;
+            self.input_mode = InputMode::Normal;
+            self.input_buffer.clear();
+        } else {
+            match &mut self.input_mode {
+                InputMode::Adding(s) => *s = next_step,
+                InputMode::Editing(_, s) => *s = next_step,
+                _ => {}
+            }
+
+            self.input_buffer = match next_step {
+                PopupStep::Title => self.popup_data.title.clone(),
+                PopupStep::Date => self.popup_data.date.clone(),
+                PopupStep::Time => self.popup_data.time.clone(),
+                PopupStep::Description => self.popup_data.description.clone(),
+            };
+            self.input_buffer.clear(); // Clear so the user starts fresh for each field
+        }
+        Ok(())
+    }
+
+    pub fn save_popup(&mut self) -> Result<()> {
+        let limit = utils::parse_full_date_time(&self.popup_data.date, &self.popup_data.time);
+        let description = if self.popup_data.description.is_empty() {
+            None
+        } else {
+            Some(self.popup_data.description.clone())
+        };
+
+        match self.input_mode {
+            InputMode::Adding(_) => {
+                db::add_task(self.conn, &self.popup_data.title, limit, description, None, None)?;
+            }
+            InputMode::Editing(id, _) => {
+                if let Some(mut task) = db::get_task(self.conn, id)? {
+                    task.title = self.popup_data.title.clone();
+                    task.limit = limit;
+                    task.description = description;
+                    db::update_task(self.conn, &task)?;
+                }
+            }
+            _ => {}
+        }
+        self.refresh_tasks()?;
+        Ok(())
+    }
+
     pub fn delete_task(&mut self) -> Result<()> {
         if let Some(i) = self.state.selected() {
             let task_id = self.filtered_tasks[i].id;
@@ -138,8 +269,6 @@ impl<'a> App<'a> {
 }
 
 pub enum TuiEvent {
-    Add,
-    Edit(i64),
     Quit,
 }
 
@@ -189,13 +318,28 @@ fn run_app<B: Backend>(terminal: &mut Terminal<B>, mut app: App) -> Result<TuiEv
                                 app.toggle_done_visibility();
                             }
                             KeyCode::Char('a') => {
-                                return Ok(TuiEvent::Add);
+                                app.start_add_popup();
                             }
                             KeyCode::Char('e') => {
-                                if let Some(i) = app.state.selected() {
-                                    let task_id = app.filtered_tasks[i].id;
-                                    return Ok(TuiEvent::Edit(task_id));
-                                }
+                                app.start_edit_popup();
+                            }
+                            _ => {}
+                        }
+                    }
+                    InputMode::Adding(_) | InputMode::Editing(_, _) => {
+                        match key.code {
+                            KeyCode::Enter => {
+                                app.next_popup_step()?;
+                            }
+                            KeyCode::Esc => {
+                                app.input_mode = InputMode::Normal;
+                                app.input_buffer.clear();
+                            }
+                            KeyCode::Char(c) => {
+                                app.input_buffer.push(c);
+                            }
+                            KeyCode::Backspace => {
+                                app.input_buffer.pop();
                             }
                             _ => {}
                         }
@@ -204,6 +348,32 @@ fn run_app<B: Backend>(terminal: &mut Terminal<B>, mut app: App) -> Result<TuiEv
             }
         }
     }
+}
+
+fn centered_rect(percent_x: u16, percent_y: u16, r: ratatui::layout::Rect) -> ratatui::layout::Rect {
+    let popup_layout = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints(
+            [
+                Constraint::Percentage((100 - percent_y) / 2),
+                Constraint::Percentage(percent_y),
+                Constraint::Percentage((100 - percent_y) / 2),
+            ]
+            .as_ref(),
+        )
+        .split(r);
+
+    Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints(
+            [
+                Constraint::Percentage((100 - percent_x) / 2),
+                Constraint::Percentage(percent_x),
+                Constraint::Percentage((100 - percent_x) / 2),
+            ]
+            .as_ref(),
+        )
+        .split(popup_layout[1])[1]
 }
 
 fn ui(f: &mut Frame, app: &mut App) {
@@ -293,9 +463,51 @@ fn ui(f: &mut Frame, app: &mut App) {
         f.render_widget(Paragraph::new("No task selected").block(detail_block), main_chunks[1]);
     }
 
-    let help_text = "j/k: Nav | Space: Toggle | h: Show/Hide Done | a: Add | e: Edit | d: Del | q: Quit";
+    let help_text = match app.input_mode {
+        InputMode::Normal => "j/k: Nav | Space: Toggle | h: Show/Hide Done | a: Add | e: Edit | d: Del | q: Quit",
+        InputMode::Adding(_) | InputMode::Editing(_, _) => "Enter: Next/Save | Esc: Cancel | Backspace: Delete",
+    };
 
     let help_msg = Paragraph::new(help_text)
         .block(Block::default().borders(Borders::ALL).title(" Help "));
     f.render_widget(help_msg, chunks[1]);
+
+    // Popup for Add/Edit
+    match &app.input_mode {
+        InputMode::Adding(step) | InputMode::Editing(_, step) => {
+            let area = centered_rect(60, 20, f.size());
+            let title = match &app.input_mode {
+                InputMode::Adding(_) => " Adding Task... ",
+                InputMode::Editing(_, _) => " Editing Task... ",
+                _ => "",
+            };
+            
+            let (prompt, help) = match step {
+                PopupStep::Title => ("Title:", "(Required)"),
+                PopupStep::Date => ("Date:", "YYYY-MM-DD or t, tm, 2d, 1w..."),
+                PopupStep::Time => ("Time:", "HH:MM or last, noon, 1h..."),
+                PopupStep::Description => ("Description:", "(Optional)"),
+            };
+
+            let popup_block = Block::default()
+                .title(title)
+                .borders(Borders::ALL)
+                .border_style(Style::default().fg(Color::Cyan));
+            
+            let mut lines = Vec::new();
+            lines.push(ratatui::text::Line::from(vec![
+                ratatui::text::Span::styled(format!("{} ", prompt), Style::default().add_modifier(Modifier::BOLD)),
+                ratatui::text::Span::raw(app.input_buffer.clone()),
+            ]));
+            lines.push(ratatui::text::Line::from(ratatui::text::Span::styled(format!("  {}", help), Style::default().fg(Color::DarkGray))));
+
+            let popup_text = Paragraph::new(lines)
+                .block(popup_block)
+                .alignment(ratatui::layout::Alignment::Left);
+            
+            f.render_widget(ratatui::widgets::Clear, area);
+            f.render_widget(popup_text, area);
+        }
+        _ => {}
+    }
 }
