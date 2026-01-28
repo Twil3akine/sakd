@@ -184,7 +184,6 @@ fn interactive_edit(conn: &rusqlite::Connection, id: i64) {
 
 fn prompt_limit(current: Option<DateTime<Utc>>) -> Option<DateTime<Utc>> {
     let current_local = current.map(|c| c.with_timezone(&Local));
-    let now = Local::now();
     let (default_date, date_help) = if let Some(local) = current_local {
         (local.format("%Y-%m-%d").to_string(), " (Enter to keep current)")
     } else {
