@@ -9,6 +9,7 @@ use unicode_width::UnicodeWidthStr;
 mod db;
 mod cli;
 mod tui;
+mod utils;
 
 fn main() {
     let cli = Cli::parse();
@@ -36,7 +37,7 @@ fn main() {
                 if desc.is_empty() { None } else { Some(desc) }
             };
             
-            db::add_task(&conn, &title, limit_dt, description).unwrap();
+            db::add_task(&conn, &title, limit_dt, description, None, None).unwrap();
             println!("Task added: {}\n", title);
         }
         Some(Commands::Done { id }) => {
@@ -91,6 +92,9 @@ fn main() {
                     tui::TuiEvent::Edit(id) => {
                         interactive_edit(&conn, id);
                     }
+                    tui::TuiEvent::Add => {
+                        interactive_add(&conn);
+                    }
                 }
             }
         }
@@ -107,14 +111,7 @@ fn main() {
                         print_tasks(tasks, all);
                     }
                     "Add" => {
-                        let title = Text::new("Task title:").prompt().unwrap_or_default();
-                        if !title.is_empty() {
-                            let limit = prompt_limit(None);
-                            let desc = Text::new("Description:").prompt().unwrap_or_default();
-                            let description = if desc.is_empty() { None } else { Some(desc) };
-                            db::add_task(&conn, &title, limit, description).unwrap();
-                            println!("Task added.");
-                        }
+                        interactive_add(&conn);
                     }
                     "Done" => {
                         if let Some(id) = resolve_id(&conn, None) {
@@ -149,6 +146,9 @@ fn main() {
                                 tui::TuiEvent::Edit(id) => {
                                     interactive_edit(&conn, id);
                                 }
+                                tui::TuiEvent::Add => {
+                                    interactive_add(&conn);
+                                }
                             }
                         }
                         break;
@@ -166,6 +166,17 @@ fn main() {
                 println!(); // Add a newline after each action
             }
         }
+    }
+}
+
+fn interactive_add(conn: &rusqlite::Connection) {
+    let title = Text::new("Task title:").prompt().unwrap_or_default();
+    if !title.is_empty() {
+        let limit = prompt_limit(None);
+        let desc = Text::new("Description:").prompt().unwrap_or_default();
+        let description = if desc.is_empty() { None } else { Some(desc) };
+        db::add_task(conn, &title, limit, description, None, None).unwrap();
+        println!("Task added.");
     }
 }
 
@@ -201,7 +212,7 @@ fn prompt_limit(current: Option<DateTime<Utc>>) -> Option<DateTime<Utc>> {
         return None;
     }
 
-    let date = parse_shortcut_date(&date_str).or_else(|| NaiveDate::parse_from_str(&date_str, "%Y-%m-%d").ok())?;
+    let date = utils::parse_shortcut_date(&date_str).or_else(|| NaiveDate::parse_from_str(&date_str, "%Y-%m-%d").ok())?;
 
     let default_time = current_local
         .map(|c| c.format("%H:%M").to_string())
@@ -216,7 +227,7 @@ fn prompt_limit(current: Option<DateTime<Utc>>) -> Option<DateTime<Utc>> {
     let time = if time_str.trim().is_empty() {
         NaiveTime::from_hms_opt(23, 59, 0).unwrap()
     } else {
-        parse_shortcut_time(&time_str).or_else(|| NaiveTime::parse_from_str(&time_str, "%H:%M").ok())
+        utils::parse_shortcut_time(&time_str).or_else(|| NaiveTime::parse_from_str(&time_str, "%H:%M").ok())
             .unwrap_or_else(|| NaiveTime::from_hms_opt(23, 59, 0).unwrap())
     };
 
@@ -224,74 +235,7 @@ fn prompt_limit(current: Option<DateTime<Utc>>) -> Option<DateTime<Utc>> {
     Local.from_local_datetime(&dt).single().map(|dt| dt.with_timezone(&Utc))
 }
 
-fn parse_shortcut_date(s: &str) -> Option<NaiveDate> {
-    let s = s.to_lowercase();
-    let now = Local::now().date_naive();
-    
-    match s.as_str() {
-        "today" | "t" => return Some(now),
-        "tomorrow" | "tm" => return Some(now + chrono::Duration::days(1)),
-        _ => {}
-    }
-
-    // [N]d, [N]w
-    if s.ends_with('d') {
-        if let Ok(n) = s[..s.len()-1].parse::<i64>() {
-            return Some(now + chrono::Duration::days(n));
-        }
-    }
-    if s.ends_with('w') {
-        if let Ok(n) = s[..s.len()-1].parse::<i64>() {
-            return Some(now + chrono::Duration::days(n * 7));
-        }
-    }
-
-    // mon, tue, wed, thu, fri, sat, sun
-    let target_weekday = match s.as_str() {
-        "mon" => Some(chrono::Weekday::Mon),
-        "tue" => Some(chrono::Weekday::Tue),
-        "wed" => Some(chrono::Weekday::Wed),
-        "thu" => Some(chrono::Weekday::Thu),
-        "fri" => Some(chrono::Weekday::Fri),
-        "sat" => Some(chrono::Weekday::Sat),
-        "sun" => Some(chrono::Weekday::Sun),
-        _ => None,
-    };
-
-    if let Some(target) = target_weekday {
-        let mut date = now + chrono::Duration::days(1);
-        use chrono::Datelike;
-        while date.weekday() != target {
-            date += chrono::Duration::days(1);
-        }
-        return Some(date);
-    }
-
-    None
-}
-
-fn parse_shortcut_time(s: &str) -> Option<NaiveTime> {
-    let s = s.to_lowercase();
-    match s.as_str() {
-        "last" => return Some(NaiveTime::from_hms_opt(23, 59, 0).unwrap()),
-        "morning" => return Some(NaiveTime::from_hms_opt(9, 0, 0).unwrap()),
-        "noon" => return Some(NaiveTime::from_hms_opt(12, 0, 0).unwrap()),
-        "evening" => return Some(NaiveTime::from_hms_opt(18, 0, 0).unwrap()),
-        "night" => return Some(NaiveTime::from_hms_opt(21, 0, 0).unwrap()),
-        _ => {}
-    }
-
-    // [N]h
-    if s.ends_with('h') {
-        if let Ok(n) = s[..s.len()-1].parse::<i64>() {
-            let now = Local::now();
-            let target = now + chrono::Duration::hours(n);
-            return Some(target.time());
-        }
-    }
-
-    None
-}
+// Shortcuts moved to utils.rs
 
 fn format_limit_color(limit: Option<DateTime<Utc>>) -> String {
     match limit {

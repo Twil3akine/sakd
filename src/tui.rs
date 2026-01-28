@@ -16,11 +16,15 @@ use std::io;
 
 use crate::db::{self, Task};
 
+pub enum InputMode {
+    Normal,
+}
+
 pub struct App<'a> {
     pub tasks: Vec<Task>,
     pub filtered_tasks: Vec<Task>,
     pub state: ListState,
-    pub input_mode: bool,
+    pub input_mode: InputMode,
     pub show_done: bool,
     pub conn: &'a Connection,
 }
@@ -32,7 +36,7 @@ impl<'a> App<'a> {
             tasks,
             filtered_tasks: Vec::new(),
             state: ListState::default(),
-            input_mode: false,
+            input_mode: InputMode::Normal,
             show_done: false,
             conn,
         };
@@ -56,7 +60,6 @@ impl<'a> App<'a> {
             if let Some(new_index) = self.filtered_tasks.iter().position(|t| t.id == id) {
                 self.state.select(Some(new_index));
             } else if let Some(i) = current_index {
-                // Task is gone (filtered or deleted), try to keep same index or clamp
                 if self.filtered_tasks.is_empty() {
                     self.state.select(None);
                 } else {
@@ -135,6 +138,7 @@ impl<'a> App<'a> {
 }
 
 pub enum TuiEvent {
+    Add,
     Edit(i64),
     Quit,
 }
@@ -169,34 +173,32 @@ fn run_app<B: Backend>(terminal: &mut Terminal<B>, mut app: App) -> Result<TuiEv
                 if key.kind != KeyEventKind::Press {
                     continue;
                 }
-                if app.input_mode {
-                    if let KeyCode::Esc = key.code {
-                        app.input_mode = false;
-                    }
-                } else {
-                    match key.code {
-                        KeyCode::Char('q') | KeyCode::Esc => return Ok(TuiEvent::Quit),
-                        KeyCode::Char('j') | KeyCode::Down => app.next(),
-                        KeyCode::Char('k') | KeyCode::Up => app.previous(),
-                        KeyCode::Char(' ') | KeyCode::Enter => {
-                            app.toggle_status()?;
-                        }
-                        KeyCode::Char('d') => {
-                            app.delete_task()?;
-                        }
-                        KeyCode::Char('h') => {
-                            app.toggle_done_visibility();
-                        }
-                        KeyCode::Char('e') => {
-                            if let Some(i) = app.state.selected() {
-                                let task_id = app.filtered_tasks[i].id;
-                                return Ok(TuiEvent::Edit(task_id));
+                match app.input_mode {
+                    InputMode::Normal => {
+                        match key.code {
+                            KeyCode::Char('q') | KeyCode::Esc => return Ok(TuiEvent::Quit),
+                            KeyCode::Char('j') | KeyCode::Down => app.next(),
+                            KeyCode::Char('k') | KeyCode::Up => app.previous(),
+                            KeyCode::Char(' ') | KeyCode::Enter => {
+                                app.toggle_status()?;
                             }
+                            KeyCode::Char('d') => {
+                                app.delete_task()?;
+                            }
+                            KeyCode::Char('h') => {
+                                app.toggle_done_visibility();
+                            }
+                            KeyCode::Char('a') => {
+                                return Ok(TuiEvent::Add);
+                            }
+                            KeyCode::Char('e') => {
+                                if let Some(i) = app.state.selected() {
+                                    let task_id = app.filtered_tasks[i].id;
+                                    return Ok(TuiEvent::Edit(task_id));
+                                }
+                            }
+                            _ => {}
                         }
-                        KeyCode::Char('a') | KeyCode::Char('i') => {
-                            app.input_mode = true;
-                        }
-                        _ => {}
                     }
                 }
             }
@@ -239,6 +241,7 @@ fn ui(f: &mut Frame, app: &mut App) {
             } else {
                 Style::default()
             };
+            
             ListItem::new(content).style(style)
         })
         .collect();
@@ -256,18 +259,23 @@ fn ui(f: &mut Frame, app: &mut App) {
     f.render_stateful_widget(tasks_list, main_chunks[0], &mut app.state);
 
     // Detail Panel
+    let selected_index = app.state.selected();
     let detail_block = Block::default().borders(Borders::ALL).title(" Details ");
-    if let Some(i) = app.state.selected() {
+    
+    if let Some(i) = selected_index {
         if let Some(task) = app.filtered_tasks.get(i) {
-            let mut details = vec![
-                format!("Title: {}", task.title),
-                format!("Status: {}", if task.is_done { "Completed" } else { "In Progress" }),
-            ];
+            let mut details = Vec::new();
+            details.push(format!("Title: {}", task.title));
+            details.push(format!("Status: {}", if task.is_done { "Completed" } else { "In Progress" }));
             
             if let Some(limit) = task.limit {
                 details.push(format!("Limit: {}", limit.with_timezone(&chrono::Local).format("%Y-%m-%d %H:%M")));
             } else {
                 details.push("Limit: None".to_string());
+            }
+
+            if let Some(tags) = &task.tags {
+                details.push(format!("Tags: {}", tags));
             }
 
             if let Some(desc) = &task.description {
@@ -285,11 +293,7 @@ fn ui(f: &mut Frame, app: &mut App) {
         f.render_widget(Paragraph::new("No task selected").block(detail_block), main_chunks[1]);
     }
 
-    let help_text = if app.input_mode {
-        "INPUT MODE: [Esc] to back"
-    } else {
-        "j/k: Nav | Space: Toggle | h: Hide/Show Done | d: Del | e: Edit | q: Quit"
-    };
+    let help_text = "j/k: Nav | Space: Toggle | h: Show/Hide Done | a: Add | e: Edit | d: Del | q: Quit";
 
     let help_msg = Paragraph::new(help_text)
         .block(Block::default().borders(Borders::ALL).title(" Help "));
