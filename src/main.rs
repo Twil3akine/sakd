@@ -37,7 +37,7 @@ fn main() {
                 if desc.is_empty() { None } else { Some(desc) }
             };
             
-            db::add_task(&conn, &title, limit_dt, description, None, None).unwrap();
+            db::add_task(&conn, &title, limit_dt, description).unwrap();
             println!("Task added: {}\n", title);
         }
         Some(Commands::Done { id }) => {
@@ -162,7 +162,7 @@ fn interactive_add(conn: &rusqlite::Connection) {
         let limit = prompt_limit(None);
         let desc = Text::new("Description:").prompt().unwrap_or_default();
         let description = if desc.is_empty() { None } else { Some(desc) };
-        db::add_task(conn, &title, limit, description, None, None).unwrap();
+        db::add_task(conn, &title, limit, description).unwrap();
         println!("Task added.");
     }
 }
@@ -185,12 +185,14 @@ fn interactive_edit(conn: &rusqlite::Connection, id: i64) {
 fn prompt_limit(current: Option<DateTime<Utc>>) -> Option<DateTime<Utc>> {
     let current_local = current.map(|c| c.with_timezone(&Local));
     let now = Local::now();
-    let default_date = current_local
-        .map(|c| c.format("%Y-%m-%d").to_string())
-        .unwrap_or_else(|| now.format("%Y-%m-%d").to_string());
+    let (default_date, date_help) = if let Some(local) = current_local {
+        (local.format("%Y-%m-%d").to_string(), " (Enter to keep current)")
+    } else {
+        (String::new(), " (Empty for none)")
+    };
 
     let date_str = Text::new("Date (YYYY-MM-DD/Shortcut):")
-        .with_help_message("Shortcuts: t (today), tm (tomorrow), 2d, 1w, mon-sun")
+        .with_help_message(&format!("Shortcuts: t (today), tm (tomorrow), 2d, 1w, mon-sun{}", date_help))
         .with_default(&default_date)
         .prompt()
         .ok()?;
@@ -201,12 +203,14 @@ fn prompt_limit(current: Option<DateTime<Utc>>) -> Option<DateTime<Utc>> {
 
     let date = utils::parse_shortcut_date(&date_str).or_else(|| NaiveDate::parse_from_str(&date_str, "%Y-%m-%d").ok())?;
 
-    let default_time = current_local
-        .map(|c| c.format("%H:%M").to_string())
-        .unwrap_or_else(|| "23:59".to_string());
+    let (default_time, time_help) = if let Some(local) = current_local {
+        (local.format("%H:%M").to_string(), " (Enter to keep current)")
+    } else {
+        ("23:59".to_string(), " (Enter for 23:59)")
+    };
 
     let time_str = Text::new("Time (HH:MM/Shortcut):")
-        .with_help_message("Shortcuts: last (23:59), morning (09:00), noon (12:00), 1h")
+        .with_help_message(&format!("Shortcuts: last (23:59), morning (09:00), noon (12:00), 1h{}", time_help))
         .with_default(&default_time)
         .prompt()
         .ok()?;

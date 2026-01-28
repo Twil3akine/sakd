@@ -163,8 +163,8 @@ impl<'a> App<'a> {
     pub fn start_add_popup(&mut self) {
         self.popup_data = PopupData {
             title: String::new(),
-            date: chrono::Local::now().format("%Y-%m-%d").to_string(),
-            time: "23:59".to_string(),
+            date: String::new(),
+            time: String::new(),
             description: String::new(),
         };
         self.input_buffer.clear();
@@ -177,9 +177,9 @@ impl<'a> App<'a> {
             self.popup_data = PopupData {
                 title: task.title.clone(),
                 date: task.limit.map(|l| l.with_timezone(&chrono::Local).format("%Y-%m-%d").to_string())
-                    .unwrap_or_else(|| chrono::Local::now().format("%Y-%m-%d").to_string()),
+                    .unwrap_or_default(),
                 time: task.limit.map(|l| l.with_timezone(&chrono::Local).format("%H:%M").to_string())
-                    .unwrap_or_else(|| "23:59".to_string()),
+                    .unwrap_or_default(),
                 description: task.description.clone().unwrap_or_default(),
             };
             self.input_buffer = self.popup_data.title.clone();
@@ -227,13 +227,21 @@ impl<'a> App<'a> {
                 PopupStep::Time => self.popup_data.time.clone(),
                 PopupStep::Description => self.popup_data.description.clone(),
             };
-            self.input_buffer.clear(); // Clear so the user starts fresh for each field
         }
         Ok(())
     }
 
     pub fn save_popup(&mut self) -> Result<()> {
-        let limit = utils::parse_full_date_time(&self.popup_data.date, &self.popup_data.time);
+        let date_str = self.popup_data.date.trim();
+        let time_str = self.popup_data.time.trim();
+        
+        let limit = if date_str.is_empty() {
+            None
+        } else {
+            let time = if time_str.is_empty() { "23:59" } else { time_str };
+            utils::parse_full_date_time(date_str, time)
+        };
+
         let description = if self.popup_data.description.is_empty() {
             None
         } else {
@@ -242,7 +250,7 @@ impl<'a> App<'a> {
 
         match self.input_mode {
             InputMode::Adding(_) => {
-                db::add_task(self.conn, &self.popup_data.title, limit, description, None, None)?;
+                db::add_task(self.conn, &self.popup_data.title, limit, description)?;
             }
             InputMode::Editing(id, _) => {
                 if let Some(mut task) = db::get_task(self.conn, id)? {
@@ -311,7 +319,7 @@ fn run_app<B: Backend>(terminal: &mut Terminal<B>, mut app: App) -> Result<TuiEv
                             KeyCode::Char(' ') | KeyCode::Enter => {
                                 app.toggle_status()?;
                             }
-                            KeyCode::Char('d') => {
+                            KeyCode::Char('r') => {
                                 app.delete_task()?;
                             }
                             KeyCode::Char('h') => {
@@ -417,7 +425,7 @@ fn ui(f: &mut Frame, app: &mut App) {
         .collect();
 
     let tasks_list = List::new(tasks)
-        .block(Block::default().borders(Borders::ALL).title(format!(" Tasks ({}) ", if app.show_done { "All" } else { "Active" })))
+        .block(Block::default().borders(Borders::ALL).title(format!(" Tasks ({}) [Sorted by Limit] ", if app.show_done { "All" } else { "Active" })))
         .highlight_style(
             Style::default()
                 .bg(Color::Blue)
@@ -444,10 +452,6 @@ fn ui(f: &mut Frame, app: &mut App) {
                 details.push("Limit: None".to_string());
             }
 
-            if let Some(tags) = &task.tags {
-                details.push(format!("Tags: {}", tags));
-            }
-
             if let Some(desc) = &task.description {
                 details.push("".to_string());
                 details.push("Description:".to_string());
@@ -464,7 +468,7 @@ fn ui(f: &mut Frame, app: &mut App) {
     }
 
     let help_text = match app.input_mode {
-        InputMode::Normal => "j/k: Nav | Space: Toggle | h: Show/Hide Done | a: Add | e: Edit | d: Del | q: Quit",
+        InputMode::Normal => "j/k: Nav | Space: Toggle | h: Show/Hide Done | a: Add | e: Edit | r: Del | q: Quit",
         InputMode::Adding(_) | InputMode::Editing(_, _) => "Enter: Next/Save | Esc: Cancel | Backspace: Delete",
     };
 
