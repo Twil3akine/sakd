@@ -56,4 +56,7 @@ pub enum Commands {
         /// Task ID
         id: Option<i64>,
     },
+    /// Open TUI mode
+    #[command(alias = "t")]
+    Tui,
 }

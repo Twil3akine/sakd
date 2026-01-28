@@ -8,6 +8,7 @@ use unicode_width::UnicodeWidthStr;
 
 mod db;
 mod cli;
+mod tui;
 
 fn main() {
     let cli = Cli::parse();
@@ -83,11 +84,21 @@ fn main() {
                 println!();
             }
         }
+        Some(Commands::Tui) => {
+            loop {
+                match tui::run_tui(&conn).expect("TUI error") {
+                    tui::TuiEvent::Quit => break,
+                    tui::TuiEvent::Edit(id) => {
+                        interactive_edit(&conn, id);
+                    }
+                }
+            }
+        }
         None => {
             // Interactive mode if no command given
             loop {
-                // Order: List, Add, Done, Show, Edit, Remove, Quit
-                let options = vec!["List", "Add", "Done", "Show", "Edit", "Remove", "Quit"];
+                // Order: List, Add, Done, Show, Edit, Remove, Tui, Quit
+                let options = vec!["List", "Add", "Done", "Show", "Edit", "Remove", "Tui", "Quit"];
                 let ans = Select::new("Choose an action:", options).prompt().unwrap_or("Quit");
                 match ans {
                     "List" => {
@@ -130,6 +141,17 @@ fn main() {
                         if let Some(id) = resolve_id(&conn, None) {
                             interactive_edit(&conn, id);
                         }
+                    }
+                    "Tui" => {
+                        loop {
+                            match tui::run_tui(&conn).expect("TUI error") {
+                                tui::TuiEvent::Quit => break,
+                                tui::TuiEvent::Edit(id) => {
+                                    interactive_edit(&conn, id);
+                                }
+                            }
+                        }
+                        break;
                     }
                     "Remove" => {
                         if let Some(id) = resolve_id(&conn, None) {

@@ -3,6 +3,7 @@ use chrono::{DateTime, Utc};
 use std::fs;
 use std::path::PathBuf;
 
+#[derive(Clone)]
 pub struct Task {
     pub id: i64,
     pub title: String,
