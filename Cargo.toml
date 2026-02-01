@@ -21,3 +21,11 @@ unicode-width = "0.1"
 ratatui = "0.26"
 crossterm = "0.27"
 anyhow = "1.0"
+
+[[bin]]
+name = "sakd"
+path = "src/bin/sakd.rs"
+
+[[bin]]
+name = "sakd-tui"
+path = "src/bin/sakd-tui.rs"
