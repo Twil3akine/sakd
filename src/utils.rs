@@ -87,3 +87,30 @@ pub fn parse_full_date_time(date_str: &str, time_str: &str) -> Option<DateTime<U
     let dt = NaiveDateTime::new(date, time);
     Local.from_local_datetime(&dt).single().map(|dt| dt.with_timezone(&Utc))
 }
+
+pub fn parse_priority(s: &str) -> crate::db::Priority {
+    match s.to_lowercase().as_str() {
+        "high" | "h" | "3" => crate::db::Priority::High,
+        "medium" | "m" | "2" => crate::db::Priority::Medium,
+        "low" | "l" | "1" => crate::db::Priority::Low,
+        _ => crate::db::Priority::None,
+    }
+}
+
+pub fn parse_tags(s: &str) -> Vec<String> {
+    s.split(',')
+        .map(|t| t.trim().to_string())
+        .filter(|t| !t.is_empty())
+        .collect()
+}
+
+pub fn has_incomplete_dependencies(task: &crate::db::Task, all_tasks: &[crate::db::Task]) -> bool {
+    for &dep_id in &task.dependencies {
+        if let Some(dep_task) = all_tasks.iter().find(|t| t.id == dep_id) {
+            if !dep_task.is_done {
+                return true;
+            }
+        }
+    }
+    false
+}
