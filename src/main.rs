@@ -136,58 +136,58 @@ fn main() {
             // Interactive mode if no command given
             loop {
                 // Order: List, Add, Done, Show, Edit, Remove, Tui, Quit
-                let options = vec!["List", "Add", "Done", "Show", "Edit", "Remove", "Tui", "Quit"];
-                let ans = Select::new("Choose an action:", options).prompt().unwrap_or("Quit");
+                let options = vec!["一覧", "追加", "完了", "詳細", "編集", "削除", "Tui形式", "終了"];
+                let ans = Select::new("アクションを選択してください:", options).prompt().unwrap_or("終了");
                 match ans {
-                    "List" => {
+                    "一覧" => {
                         let tasks = db::get_tasks(&conn).unwrap();
-                        let all = Confirm::new("Show completed tasks?").with_default(false).prompt().unwrap_or(false);
+                        let all = Confirm::new("完了したタスクも含めますか？").with_default(false).prompt().unwrap_or(false);
                         print_tasks(&tasks, all);
                     }
-                    "Add" => {
+                    "追加" => {
                         interactive_add(&conn);
                     }
-                    "Done" => {
+                    "完了" => {
                         if let Some(id) = resolve_id(&conn, None) {
                             if let Some(mut task) = db::get_task(&conn, id).unwrap() {
                                 task.is_done = true;
                                 db::update_task(&conn, &task).unwrap();
-                                println!("Task marked as done.");
+                                println!("タスクを完了にしました。");
                             }
                         }
                     }
-                    "Show" => {
+                    "詳細" => {
                         if let Some(id) = resolve_id(&conn, None) {
                             if let Some(task) = db::get_task(&conn, id).unwrap() {
-                                println!("\n{}", "--- Task Details ---".cyan().bold());
+                                println!("\n{}", "--- タスク詳細 ---".cyan().bold());
                                 println!("{}: {}", "ID".bold(), task.id);
-                                println!("{}: {}", "Title".bold(), task.title);
-                                println!("{}: {}", "Priority".bold(), format!("{:?}", task.priority));
-                                println!("{}: {}", "Tags".bold(), task.tags.join(", "));
-                                println!("{}: {}", "Dependencies".bold(), task.dependencies.iter().map(|id| id.to_string()).collect::<Vec<_>>().join(", "));
-                                println!("{}: {}", "Done".bold(), if task.is_done { "Yes".green() } else { "No".red() });
-                                println!("{}: {}", "Limit".bold(), format_limit_color(task.limit));
-                                println!("{}: {}", "Description".bold(), task.description.unwrap_or_else(|| "None".to_string()));
+                                println!("{}: {}", "タイトル".bold(), task.title);
+                                println!("{}: {}", "優先度".bold(), format!("{:?}", task.priority));
+                                println!("{}: {}", "タグ".bold(), task.tags.join(", "));
+                                println!("{}: {}", "依存関係".bold(), task.dependencies.iter().map(|id| id.to_string()).collect::<Vec<_>>().join(", "));
+                                println!("{}: {}", "完了".bold(), if task.is_done { "はい".green() } else { "いいえ".red() });
+                                println!("{}: {}", "期限".bold(), format_limit_color(task.limit));
+                                println!("{}: {}", "詳細".bold(), task.description.unwrap_or_else(|| "なし".to_string()));
                             }
                         }
                     }
-                    "Edit" => {
+                    "編集" => {
                         if let Some(id) = resolve_id(&conn, None) {
                             interactive_edit(&conn, id);
                         }
                     }
-                    "Tui" => {
+                    "Tui形式" => {
                         loop {
                             match tui::run_tui(&conn).expect("TUI error") {
                                 tui::TuiEvent::Quit => break,
                             }
                         }
                     }
-                    "Remove" => {
+                    "削除" => {
                         if let Some(id) = resolve_id(&conn, None) {
-                            if Confirm::new("Are you sure?").with_default(false).prompt().unwrap_or(false) {
+                            if Confirm::new("本当によろしいですか？").with_default(false).prompt().unwrap_or(false) {
                                 db::delete_task(&conn, id).unwrap();
-                                println!("Task removed.");
+                                println!("タスクを削除しました。");
                             }
                         }
                     }
@@ -204,29 +204,29 @@ fn interactive_add(conn: &rusqlite::Connection) {
     let title = Text::new("Task title:").prompt().unwrap_or_default();
     if !title.is_empty() {
         let priority_options = vec![" ", "Low", "Medium", "High"];
-        let priority_ans = Select::new("Priority:", priority_options).prompt().unwrap_or(" ");
+        let priority_ans = Select::new("優先度:", priority_options).prompt().unwrap_or(" ");
         let priority = if priority_ans == " " { db::Priority::None } else { utils::parse_priority(priority_ans) };
 
-        let tags_ans = Text::new("Tags (comma separated):").prompt().unwrap_or_default();
+        let tags_ans = Text::new("タグ (カンマ区切り):").prompt().unwrap_or_default();
         let tags = utils::parse_tags(&tags_ans);
 
-        let dep_ans = Text::new("Dependencies (comma separated IDs):").prompt().unwrap_or_default();
+        let dep_ans = Text::new("依存ID (カンマ区切り数値):").prompt().unwrap_or_default();
         let dependencies = dep_ans.split(',').filter_map(|s| s.trim().parse::<i64>().ok()).collect();
 
         let limit = prompt_limit(None);
-        let desc = Text::new("Description:").prompt().unwrap_or_default();
+        let desc = Text::new("詳細:").prompt().unwrap_or_default();
         let description = if desc.is_empty() { None } else { Some(desc) };
         db::add_task(conn, &title, limit, description, priority, tags, dependencies).unwrap();
-        println!("Task added.");
+        println!("タスクを追加しました。");
     }
 }
 
 fn interactive_edit(conn: &rusqlite::Connection, id: i64) {
     if let Some(mut task) = db::get_task(conn, id).unwrap() {
-        task.title = Text::new("Title:").with_default(&task.title).prompt().unwrap_or(task.title);
+        task.title = Text::new("タイトル:").with_default(&task.title).prompt().unwrap_or(task.title);
         
         let priority_options = vec![" ", "Low", "Medium", "High"];
-        let priority_ans = Select::new("Priority:", priority_options).with_starting_cursor(match task.priority {
+        let priority_ans = Select::new("優先度:", priority_options).with_starting_cursor(match task.priority {
             db::Priority::None => 0,
             db::Priority::Low => 1,
             db::Priority::Medium => 2,
@@ -235,34 +235,34 @@ fn interactive_edit(conn: &rusqlite::Connection, id: i64) {
         task.priority = if priority_ans == " " { db::Priority::None } else { utils::parse_priority(priority_ans) };
 
         let tags_str = task.tags.join(", ");
-        let tags_ans = Text::new("Tags (comma separated):").with_default(&tags_str).prompt().unwrap_or(tags_str);
+        let tags_ans = Text::new("タグ (カンマ区切り):").with_default(&tags_str).prompt().unwrap_or(tags_str);
         task.tags = utils::parse_tags(&tags_ans);
 
         let dep_str = task.dependencies.iter().map(|id| id.to_string()).collect::<Vec<_>>().join(", ");
-        let dep_ans = Text::new("Dependencies (comma separated IDs):").with_default(&dep_str).prompt().unwrap_or(dep_str);
+        let dep_ans = Text::new("依存ID (カンマ区切り数値):").with_default(&dep_str).prompt().unwrap_or(dep_str);
         task.dependencies = dep_ans.split(',').filter_map(|s| s.trim().parse::<i64>().ok()).collect();
 
         task.limit = prompt_limit(task.limit);
         
         let current_desc = task.description.clone().unwrap_or_default();
-        let desc = Text::new("Description:").with_default(&current_desc).prompt().unwrap_or(current_desc);
+        let desc = Text::new("詳細:").with_default(&current_desc).prompt().unwrap_or(current_desc);
         task.description = if desc.is_empty() { None } else { Some(desc) };
 
         db::update_task(conn, &task).unwrap();
-        println!("Task updated.");
+        println!("タスクを更新しました。");
     }
 }
 
 fn prompt_limit(current: Option<DateTime<Utc>>) -> Option<DateTime<Utc>> {
     let current_local = current.map(|c| c.with_timezone(&Local));
     let (default_date, date_help) = if let Some(local) = current_local {
-        (local.format("%Y-%m-%d").to_string(), " (Enter to keep current)")
+        (local.format("%Y/%m/%d").to_string(), " (Enterで現在値を維持)")
     } else {
-        (String::new(), " (Empty for none)")
+        (String::new(), " (空欄で指定なし)")
     };
 
-    let date_str = Text::new("Date (YYYY-MM-DD/Shortcut):")
-        .with_help_message(&format!("Shortcuts: t (today), tm (tomorrow), 2d, 1w, mon-sun{}", date_help))
+    let date_str = Text::new("日付 (YYYY/MM/DD または MM/DD/省略形式):")
+        .with_help_message(&format!("省略形式: t (今日), tm (明日), 2d, 1w, mon-sun{}", date_help))
         .with_default(&default_date)
         .prompt()
         .ok()?;
@@ -271,16 +271,22 @@ fn prompt_limit(current: Option<DateTime<Utc>>) -> Option<DateTime<Utc>> {
         return None;
     }
 
-    let date = utils::parse_shortcut_date(&date_str).or_else(|| NaiveDate::parse_from_str(&date_str, "%Y-%m-%d").ok())?;
+    let date = utils::parse_shortcut_date(&date_str)
+        .or_else(|| NaiveDate::parse_from_str(&date_str, "%Y/%m/%d").ok())
+        .or_else(|| {
+            let now = Local::now().date_naive();
+            NaiveDate::parse_from_str(&date_str, "%m/%d").ok()
+                .map(|d| NaiveDate::from_ymd_opt(now.year(), d.month(), d.day())).flatten()
+        })?;
 
     let (default_time, time_help) = if let Some(local) = current_local {
-        (local.format("%H:%M").to_string(), " (Enter to keep current)")
+        (local.format("%H:%M").to_string(), " (Enterで現在値を維持)")
     } else {
-        ("23:59".to_string(), " (Enter for 23:59)")
+        ("23:59".to_string(), " (Enterで23:59)")
     };
 
-    let time_str = Text::new("Time (HH:MM/Shortcut):")
-        .with_help_message(&format!("Shortcuts: last (23:59), morning (09:00), noon (12:00), 1h{}", time_help))
+    let time_str = Text::new("時刻 (HH:MM/省略形式):")
+        .with_help_message(&format!("省略形式: last (23:59), morning (09:00), noon (12:00), 1h{}", time_help))
         .with_default(&default_time)
         .prompt()
         .ok()?;
@@ -303,7 +309,7 @@ fn format_limit_color(limit: Option<DateTime<Utc>>) -> String {
         Some(l) => {
             let now = Utc::now();
             let local_l = l.with_timezone(&Local);
-            let s = local_l.format("%Y-%m-%d %H:%M").to_string();
+            let s = local_l.format("%Y/%m/%d %H:%M").to_string();
             
             if l < now {
                 // Overdue: Bright Magenta and Bold
@@ -322,7 +328,7 @@ fn format_limit_color(limit: Option<DateTime<Utc>>) -> String {
                 s.bright_black().to_string()
             }
         }
-        None => "None".bright_black().to_string(),
+        None => "なし".bright_black().to_string(),
     }
 }
 
@@ -338,7 +344,7 @@ fn pad_title(title: &str, width: usize) -> String {
 fn print_tasks(tasks: &[db::Task], show_all: bool) {
     let all_tasks = tasks.to_vec();
     if show_all {
-        println!("  st  P   {}  {}", pad_title("title", 25), "limit");
+        println!("  st  P   {}  {}", pad_title("タイトル", 25), "期限");
         println!("------------------------------------------------------------");
         for t in tasks {
             let status = if t.is_done { "v ".green() } else { "- ".red() };
@@ -348,7 +354,7 @@ fn print_tasks(tasks: &[db::Task], show_all: bool) {
             println!("  {} {} {} {}  {}", status, prio, dep_warn, pad_title(&t.title, 25), limit);
         }
     } else {
-        println!("  P   {}  {}", pad_title("title", 25), "limit");
+        println!("  P   {}  {}", pad_title("タイトル", 25), "期限");
         println!("------------------------------------------------------------");
         for t in tasks.iter().filter(|t| !t.is_done) {
             let prio = t.priority.to_symbol();
@@ -364,12 +370,12 @@ fn resolve_id(conn: &rusqlite::Connection, id: Option<i64>) -> Option<i64> {
         if db::get_task(conn, id).unwrap().is_some() {
             return Some(id);
         }
-        println!("ID {} not found.", id);
+        println!("ID {} が見つかりません。", id);
     }
 
     let tasks = db::get_tasks(conn).unwrap();
     if tasks.is_empty() {
-        println!("No tasks available.");
+        println!("タスクがありません。");
         return None;
     }
 
@@ -378,11 +384,11 @@ fn resolve_id(conn: &rusqlite::Connection, id: Option<i64>) -> Option<i64> {
         .map(|t| format!("{}: {}", t.id, t.title)).collect();
     
     if options.is_empty() {
-        println!("No active tasks available.");
+        println!("実行中のタスクがありません。");
         return None;
     }
 
-    let ans = Select::new("Select a task:", options).prompt().ok()?;
+    let ans = Select::new("タスクを選択してください:", options).prompt().ok()?;
     let id_str = ans.split(':').next()?;
     id_str.parse().ok()
 }

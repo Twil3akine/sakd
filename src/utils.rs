@@ -74,7 +74,11 @@ pub fn parse_full_date_time(date_str: &str, time_str: &str) -> Option<DateTime<U
     }
 
     let date = parse_shortcut_date(date_str)
-        .or_else(|| NaiveDate::parse_from_str(date_str, "%Y-%m-%d").ok())?;
+        .or_else(|| NaiveDate::parse_from_str(date_str, "%Y/%m/%d").ok())
+        .or_else(|| {
+            let now = Local::now().date_naive();
+            NaiveDate::parse_from_str(&format!("{}/{}", now.year(), date_str), "%Y/%m/%d").ok()
+        })?;
 
     let time = if time_str.trim().is_empty() {
         NaiveTime::from_hms_opt(23, 59, 0).unwrap()
@@ -90,9 +94,9 @@ pub fn parse_full_date_time(date_str: &str, time_str: &str) -> Option<DateTime<U
 
 pub fn parse_priority(s: &str) -> crate::db::Priority {
     match s.to_lowercase().as_str() {
-        "high" | "h" | "3" => crate::db::Priority::High,
-        "medium" | "m" | "2" => crate::db::Priority::Medium,
-        "low" | "l" | "1" => crate::db::Priority::Low,
+        "high" | "h" => crate::db::Priority::High,
+        "medium" | "m" => crate::db::Priority::Medium,
+        "low" | "l" => crate::db::Priority::Low,
         _ => crate::db::Priority::None,
     }
 }
@@ -113,4 +117,45 @@ pub fn has_incomplete_dependencies(task: &crate::db::Task, all_tasks: &[crate::d
         }
     }
     false
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use chrono::Datelike;
+
+    #[test]
+    fn test_parse_full_date_time() {
+        let now = Local::now().date_naive();
+        
+        // YYYY/MM/DD
+        let dt = parse_full_date_time("2026/02/10", "12:00").unwrap();
+        assert_eq!(dt.with_timezone(&Local).year(), 2026);
+        assert_eq!(dt.with_timezone(&Local).month(), 2);
+        assert_eq!(dt.with_timezone(&Local).day(), 10);
+
+        // MM/DD (Current year)
+        let dt = parse_full_date_time("05/20", "10:30").unwrap();
+        assert_eq!(dt.with_timezone(&Local).year(), now.year());
+        assert_eq!(dt.with_timezone(&Local).month(), 5);
+        assert_eq!(dt.with_timezone(&Local).day(), 20);
+
+        // Invalid format (-) should be None
+        let dt = parse_full_date_time("2026-02-10", "12:00");
+        assert!(dt.is_none());
+    }
+
+    #[test]
+    fn test_parse_priority() {
+        assert_eq!(parse_priority("h"), crate::db::Priority::High);
+        assert_eq!(parse_priority("high"), crate::db::Priority::High);
+        assert_eq!(parse_priority("m"), crate::db::Priority::Medium);
+        assert_eq!(parse_priority("medium"), crate::db::Priority::Medium);
+        assert_eq!(parse_priority("l"), crate::db::Priority::Low);
+        assert_eq!(parse_priority("low"), crate::db::Priority::Low);
+        
+        // 1-3 should be None
+        assert_eq!(parse_priority("1"), crate::db::Priority::None);
+        assert_eq!(parse_priority("3"), crate::db::Priority::None);
+    }
 }

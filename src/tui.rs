@@ -43,6 +43,7 @@ pub enum InputMode {
     Deleting(i64),
     FilteringTag,
     FilteringPriority,
+    Helping,
 }
 
 pub struct PopupData {
@@ -466,8 +467,19 @@ fn run_app<B: Backend>(terminal: &mut Terminal<B>, mut app: App) -> Result<TuiEv
                              KeyCode::Char('p') => {
                                 app.input_mode = InputMode::FilteringPriority;
                              }
+                             KeyCode::Char('?') => {
+                                app.input_mode = InputMode::Helping;
+                             }
                              _ => {}
                          }
+                    }
+                    InputMode::Helping => {
+                        match key.code {
+                            KeyCode::Esc | KeyCode::Char('?') | KeyCode::Char('q') | KeyCode::Enter => {
+                                app.input_mode = InputMode::Normal;
+                            }
+                            _ => {}
+                        }
                     }
                     InputMode::Adding(_) | InputMode::Editing(_, _) => {
                         match key.code {
@@ -626,10 +638,10 @@ fn ui(f: &mut Frame, app: &mut App) {
 
     let tasks_list = List::new(tasks)
         .block(Block::default().borders(Borders::ALL).title(format!(
-            " Tasks ({}) [Sort: {:?}] [Filter: T:{:?} P:{:?}] ", 
-            if app.show_done { "All" } else { "Active" },
+            " タスク ({}) [ソート: {:?}] [フィルタ: タグ:{:?} 優先度:{:?}] ", 
+            if app.show_done { "すべて" } else { "実行中" },
             app.sort_order,
-            app.tag_filter.as_ref().unwrap_or(&"None".to_string()),
+            app.tag_filter.as_ref().unwrap_or(&"なし".to_string()),
             app.priority_filter
         )))
         .highlight_style(
@@ -649,15 +661,15 @@ fn ui(f: &mut Frame, app: &mut App) {
     if let Some(i) = selected_index {
         if let Some(task) = app.filtered_tasks.get(i) {
             let mut details = Vec::new();
-            details.push(format!("Title: {}", task.title));
-            details.push(format!("Priority: {:?}", task.priority));
-            details.push(format!("Tags: {}", task.tags.join(", ")));
-            details.push(format!("Done: {}", if task.is_done { "Yes" } else { "No" }));
+            details.push(format!("タイトル: {}", task.title));
+            details.push(format!("優先度: {:?}", task.priority));
+            details.push(format!("タグ: {}", task.tags.join(", ")));
+            details.push(format!("完了: {}", if task.is_done { "はい" } else { "いいえ" }));
             
             if let Some(limit) = task.limit {
-                details.push(format!("Limit: {}", limit.with_timezone(&chrono::Local).format("%Y-%m-%d %H:%M")));
+                details.push(format!("期限: {}", limit.with_timezone(&chrono::Local).format("%Y/%m/%d %H:%M")));
             } else {
-                details.push("Limit: None".to_string());
+                details.push("期限: なし".to_string());
             }
 
             if !task.dependencies.is_empty() {
@@ -683,15 +695,16 @@ fn ui(f: &mut Frame, app: &mut App) {
     }
 
     let help_text = match app.input_mode {
-        InputMode::Normal => "j/k: Nav | Space: Toggle | h: Hide/Show Done | a: Add | e: Edit | r: Del | s: Suggest | o: Sort | f/p: Filter | q: Quit",
-        InputMode::Adding(_) | InputMode::Editing(_, _) => "Enter: Next/Save | Esc: Cancel | Backspace: Delete",
-        InputMode::Deleting(_) => "Enter: Confirm Delete | Esc/n: Cancel",
-        InputMode::FilteringTag => "Enter: Set Tag Filter | Esc: Cancel",
-        InputMode::FilteringPriority => "l/m/h: Filter | Space/n: None | Esc: Cancel",
+        InputMode::Normal => "j/k: 移動 | Space: 完了/未完了 | h: 完了表示切替 | a: 追加 | e: 編集 | r: 削除 | s: 提案 | o: ソート | f/p: フィルタ | ?: ヘルプ | q: 終了",
+        InputMode::Adding(_) | InputMode::Editing(_, _) => "Enter: 次へ/保存 | Esc: キャンセル | Backspace: 削除",
+        InputMode::Deleting(_) => "Enter: 削除確定 | Esc/n: キャンセル",
+        InputMode::FilteringTag => "Enter: タグフィルタ設定 | Esc: キャンセル",
+        InputMode::FilteringPriority => "l/m/h: フィルタ | Space/n: クリア | Esc: キャンセル",
+        InputMode::Helping => "Esc/?: 閉じる",
     };
 
     let help_msg = Paragraph::new(help_text)
-        .block(Block::default().borders(Borders::ALL).title(" Help "));
+        .block(Block::default().borders(Borders::ALL).title(" ヘルプ "));
     f.render_widget(help_msg, chunks[1]);
 
     // Popup for Add/Edit
@@ -705,13 +718,13 @@ fn ui(f: &mut Frame, app: &mut App) {
             };
             
             let (prompt, help) = match step {
-                PopupStep::Title => ("Title:", "(Required)"),
-                PopupStep::Priority => ("Priority:", "High, Medium, Low, None"),
-                PopupStep::Tags => ("Tags:", "comma, separated, tags"),
-                PopupStep::Dependencies => ("Dep IDs:", "comma, separated, numbers"),
-                PopupStep::Date => ("Date:", "YYYY-MM-DD or t, tm, 2d, 1w..."),
-                PopupStep::Time => ("Time:", "HH:MM or last, noon, 1h..."),
-                PopupStep::Description => ("Description:", "(Optional)"),
+                PopupStep::Title => ("タイトル:", "(必須)"),
+                PopupStep::Priority => ("優先度:", "h/m/l または high/medium/low"),
+                PopupStep::Tags => ("タグ:", "カンマ区切り"),
+                PopupStep::Dependencies => ("依存ID:", "カンマ区切り数値"),
+                PopupStep::Date => ("日付:", "YYYY/MM/DD または MM/DD ( shortcuts: t, tm, 2d, 1w... )"),
+                PopupStep::Time => ("時刻:", "HH:MM ( shortcuts: last, noon, 1h... )"),
+                PopupStep::Description => ("詳細:", "(任意)"),
             };
 
             let popup_block = Block::default()
@@ -736,11 +749,11 @@ fn ui(f: &mut Frame, app: &mut App) {
         InputMode::Deleting(_) => {
             let area = centered_rect(50, 15, f.size());
             let popup_block = Block::default()
-                .title(" Confirm Delete ")
+                .title(" 削除確認 ")
                 .borders(Borders::ALL)
                 .border_style(Style::default().fg(Color::Red));
             
-            let popup_text = Paragraph::new("\n  Are you sure you want to delete this task?\n\n  [Enter] Confirm  [Esc/n] Cancel")
+            let popup_text = Paragraph::new("\n  本当にこのタスクを削除しますか？\n\n  [Enter] 削除  [Esc/n] キャンセル")
                 .block(popup_block)
                 .alignment(ratatui::layout::Alignment::Center);
             
@@ -749,7 +762,7 @@ fn ui(f: &mut Frame, app: &mut App) {
         }
         InputMode::FilteringTag => {
             let area = centered_rect(60, 20, f.size());
-            let block = Block::default().title(" Filter by Tag ").borders(Borders::ALL);
+            let block = Block::default().title(" タグでフィルタ ").borders(Borders::ALL);
             let text = Paragraph::new(app.input_buffer.as_str())
                 .block(block)
                 .style(Style::default().fg(Color::Yellow));
@@ -758,10 +771,43 @@ fn ui(f: &mut Frame, app: &mut App) {
         }
         InputMode::FilteringPriority => {
             let area = centered_rect(50, 20, f.size());
-            let block = Block::default().title(" Filter by Priority ").borders(Borders::ALL);
-            let text = Paragraph::new("\n  [l] Low  [m] Medium  [h] High  [Space/n] Clear Filter\n\n  [Esc] Cancel")
+            let block = Block::default().title(" 優先度でフィルタ ").borders(Borders::ALL);
+            let text = Paragraph::new("\n  [l] Low  [m] Medium  [h] High  [Space/n] クリア\n\n  [Esc] キャンセル")
                 .block(block)
                 .alignment(ratatui::layout::Alignment::Center);
+            f.render_widget(ratatui::widgets::Clear, area);
+            f.render_widget(text, area);
+        }
+        InputMode::Helping => {
+            let area = centered_rect(80, 80, f.size());
+            let block = Block::default().title(" 詳細ヘルプ ").borders(Borders::ALL).border_style(Style::default().fg(Color::Green));
+            let help_content = vec![
+                "=== 基本操作 ===",
+                "j/k or \u{2193}/\u{2191}: タスク選択",
+                "Space/Enter: 完了/未完了の切り替え",
+                "a: タスクの追加",
+                "e: タスクの編集",
+                "r: タスクの削除",
+                "o: ソート順の変更 (期限, 優先度, ID)",
+                "s: 次にやるべきタスクを提案",
+                "h: 完了済みタスクの表示/非表示",
+                "f: タグでフィルタリング",
+                "p: 優先度でフィルタリング",
+                "q/Esc: 終了",
+                "",
+                "=== 入力形式 (追加/編集) ===",
+                "優先度: h (High), m (Medium), l (Low), None",
+                "日付: YYYY/MM/DD, MM/DD",
+                "      ショートカット: t (今日), tm (明日), 2d (2日後), 1w (1週間後)...",
+                "      曜日: mon, tue, wed, thu, fri, sat, sun",
+                "時刻: HH:MM",
+                "      ショートカット: last (23:59), noon (12:00), 1h (1時間後)...",
+                "",
+                "[Esc/?: 閉じる]"
+            ];
+            let text = Paragraph::new(help_content.join("\n"))
+                .block(block)
+                .alignment(ratatui::layout::Alignment::Left);
             f.render_widget(ratatui::widgets::Clear, area);
             f.render_widget(text, area);
         }
