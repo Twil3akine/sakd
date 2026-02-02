@@ -21,15 +21,9 @@ pub enum Commands {
         /// Task description
         #[arg(short, long)]
         description: Option<String>,
-        /// Task priority (high, medium, low, none)
-        #[arg(long)]
-        priority: Option<String>,
         /// Task tags (comma separated)
         #[arg(long)]
         tags: Option<String>,
-        /// Task dependencies (comma separated IDs)
-        #[arg(long)]
-        dep: Option<String>,
     },
     /// Mark a task as done
     #[command(alias = "d")]
@@ -52,12 +46,6 @@ pub enum Commands {
         /// Filter by tag
         #[arg(long)]
         tag: Option<String>,
-        /// Filter by priority
-        #[arg(long)]
-        priority: Option<String>,
-        /// Order by (name, limit, etc.)
-        #[arg(short, long)]
-        order: Option<String>,
     },
     /// Show task details
     #[command(alias = "s")]

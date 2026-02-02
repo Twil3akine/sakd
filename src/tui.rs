@@ -16,24 +16,14 @@ use std::io;
 
 use crate::db::{self, Task};
 use crate::utils;
-use chrono::Utc;
 
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub enum PopupStep {
     Title,
-    Priority,
     Tags,
-    Dependencies,
     Date,
     Time,
     Description,
-}
-
-#[derive(Clone, Copy, PartialEq, Debug)]
-pub enum SortOrder {
-    Limit,
-    Priority,
-    Id,
 }
 
 pub enum InputMode {
@@ -42,15 +32,12 @@ pub enum InputMode {
     Editing(i64, PopupStep),
     Deleting(i64),
     FilteringTag,
-    FilteringPriority,
     Helping,
 }
 
 pub struct PopupData {
     pub title: String,
-    pub priority: String,
     pub tags: String,
-    pub dependencies: String,
     pub date: String,
     pub time: String,
     pub description: String,
@@ -60,9 +47,7 @@ impl Default for PopupData {
     fn default() -> Self {
         Self {
             title: String::new(),
-            priority: "None".to_string(),
             tags: String::new(),
-            dependencies: String::new(),
             date: String::new(),
             time: String::new(),
             description: String::new(),
@@ -79,8 +64,6 @@ pub struct App<'a> {
     pub popup_data: PopupData,
     pub show_done: bool,
     pub tag_filter: Option<String>,
-    pub priority_filter: Option<db::Priority>,
-    pub sort_order: SortOrder,
     pub conn: &'a Connection,
 }
 
@@ -96,8 +79,6 @@ impl<'a> App<'a> {
             popup_data: PopupData::default(),
             show_done: false,
             tag_filter: None,
-            priority_filter: None,
-            sort_order: SortOrder::Limit,
             conn,
         };
         app.update_filtered_tasks();
@@ -113,31 +94,16 @@ impl<'a> App<'a> {
         let mut filtered: Vec<Task> = self.tasks.iter()
             .filter(|t| self.show_done || !t.is_done)
             .filter(|t| self.tag_filter.as_ref().map_or(true, |f| t.tags.iter().any(|tag| tag.to_lowercase().contains(&f.to_lowercase()))))
-            .filter(|t| self.priority_filter.as_ref().map_or(true, |f| &t.priority == f))
             .cloned()
             .collect();
 
-        match self.sort_order {
-            SortOrder::Limit => {
-                filtered.sort_by(|a, b| {
-                    a.is_done.cmp(&b.is_done)
-                        .then_with(|| a.limit.is_none().cmp(&b.limit.is_none()))
-                        .then_with(|| a.limit.cmp(&b.limit))
-                });
-            }
-            SortOrder::Priority => {
-                filtered.sort_by(|a, b| {
-                    a.is_done.cmp(&b.is_done)
-                        .then_with(|| b.priority.to_int().cmp(&a.priority.to_int()))
-                });
-            }
-            SortOrder::Id => {
-                filtered.sort_by(|a, b| {
-                    a.is_done.cmp(&b.is_done)
-                        .then_with(|| a.id.cmp(&b.id))
-                });
-            }
-        }
+        // Default sort: is_done ASC, limit ASC
+        filtered.sort_by(|a, b| {
+            a.is_done.cmp(&b.is_done)
+                .then_with(|| a.limit.is_none().cmp(&b.limit.is_none()))
+                .then_with(|| a.limit.cmp(&b.limit))
+        });
+        
         self.filtered_tasks = filtered;
 
         if let Some(id) = selected_id {
@@ -214,9 +180,7 @@ impl<'a> App<'a> {
     pub fn start_add_popup(&mut self) {
         self.popup_data = PopupData {
             title: String::new(),
-            priority: " ".to_string(),
             tags: String::new(),
-            dependencies: String::new(),
             date: String::new(),
             time: String::new(),
             description: String::new(),
@@ -230,9 +194,7 @@ impl<'a> App<'a> {
             let task = &self.filtered_tasks[i];
             self.popup_data = PopupData {
                 title: task.title.clone(),
-                priority: if task.priority == db::Priority::None { " ".to_string() } else { format!("{:?}", task.priority) },
                 tags: task.tags.join(", "),
-                dependencies: task.dependencies.iter().map(|id| id.to_string()).collect::<Vec<_>>().join(", "),
                 date: task.limit.map(|l| l.with_timezone(&chrono::Local).format("%Y-%m-%d").to_string())
                     .unwrap_or_default(),
                 time: task.limit.map(|l| l.with_timezone(&chrono::Local).format("%H:%M").to_string())
@@ -249,18 +211,10 @@ impl<'a> App<'a> {
             InputMode::Adding(step) | InputMode::Editing(_, step) => match step {
                 PopupStep::Title => {
                     self.popup_data.title = self.input_buffer.clone();
-                    (PopupStep::Priority, false)
-                }
-                PopupStep::Priority => {
-                    self.popup_data.priority = self.input_buffer.clone();
                     (PopupStep::Tags, false)
                 }
                 PopupStep::Tags => {
                     self.popup_data.tags = self.input_buffer.clone();
-                    (PopupStep::Dependencies, false)
-                }
-                PopupStep::Dependencies => {
-                    self.popup_data.dependencies = self.input_buffer.clone();
                     (PopupStep::Date, false)
                 }
                 PopupStep::Date => {
@@ -292,9 +246,7 @@ impl<'a> App<'a> {
 
             self.input_buffer = match next_step {
                 PopupStep::Title => self.popup_data.title.clone(),
-                PopupStep::Priority => self.popup_data.priority.clone(),
                 PopupStep::Tags => self.popup_data.tags.clone(),
-                PopupStep::Dependencies => self.popup_data.dependencies.clone(),
                 PopupStep::Date => self.popup_data.date.clone(),
                 PopupStep::Time => self.popup_data.time.clone(),
                 PopupStep::Description => self.popup_data.description.clone(),
@@ -320,25 +272,18 @@ impl<'a> App<'a> {
             Some(self.popup_data.description.clone())
         };
 
-        let priority = utils::parse_priority(&self.popup_data.priority);
         let tags = utils::parse_tags(&self.popup_data.tags);
-        let dependencies = self.popup_data.dependencies
-            .split(',')
-            .filter_map(|s| s.trim().parse::<i64>().ok())
-            .collect();
 
         match self.input_mode {
             InputMode::Adding(_) => {
-                db::add_task(self.conn, &self.popup_data.title, limit, description, priority, tags, dependencies)?;
+                db::add_task(self.conn, &self.popup_data.title, limit, description, tags)?;
             }
             InputMode::Editing(id, _) => {
                 if let Some(mut task) = db::get_task(self.conn, id)? {
                     task.title = self.popup_data.title.clone();
                     task.limit = limit;
                     task.description = description;
-                    task.priority = priority;
                     task.tags = tags;
-                    task.dependencies = dependencies;
                     db::update_task(self.conn, &task)?;
                 }
             }
@@ -348,52 +293,6 @@ impl<'a> App<'a> {
         Ok(())
     }
 
-    pub fn cycle_sort_order(&mut self) {
-        self.sort_order = match self.sort_order {
-            SortOrder::Limit => SortOrder::Priority,
-            SortOrder::Priority => SortOrder::Id,
-            SortOrder::Id => SortOrder::Limit,
-        };
-        self.update_filtered_tasks();
-    }
-
-    pub fn jump_to_suggestion(&mut self) {
-        // Scoring: 緊急度(Score based on days) + 重要度(Priority * 10)
-        let now = Utc::now();
-        let mut best_id = None;
-        let mut best_score = -1.0;
-
-        for task in self.tasks.iter().filter(|t| !t.is_done) {
-            let mut score = match task.priority {
-                db::Priority::High => 30.0,
-                db::Priority::Medium => 20.0,
-                db::Priority::Low => 10.0,
-                db::Priority::None => 0.0,
-            };
-
-            if let Some(limit) = task.limit {
-                let diff = limit.signed_duration_since(now).num_hours() as f64;
-                if diff < 0.0 {
-                    score += 50.0; // Overdue
-                } else if diff < 24.0 {
-                    score += 40.0;
-                } else if diff < 72.0 {
-                    score += 20.0;
-                }
-            }
-
-            if score > best_score {
-                best_score = score;
-                best_id = Some(task.id);
-            }
-        }
-
-        if let Some(id) = best_id {
-            if let Some(pos) = self.filtered_tasks.iter().position(|t| t.id == id) {
-                self.state.select(Some(pos));
-            }
-        }
-    }
 }
 
 pub enum TuiEvent {
@@ -454,18 +353,9 @@ fn run_app<B: Backend>(terminal: &mut Terminal<B>, mut app: App) -> Result<TuiEv
                              KeyCode::Char('e') => {
                                 app.start_edit_popup();
                              }
-                             KeyCode::Char('s') => {
-                                app.jump_to_suggestion();
-                             }
-                             KeyCode::Char('o') => {
-                                app.cycle_sort_order();
-                             }
-                             KeyCode::Char('f') => {
+                            KeyCode::Char('f') => {
                                 app.input_mode = InputMode::FilteringTag;
                                 app.input_buffer = app.tag_filter.clone().unwrap_or_default();
-                             }
-                             KeyCode::Char('p') => {
-                                app.input_mode = InputMode::FilteringPriority;
                              }
                              KeyCode::Char('?') => {
                                 app.input_mode = InputMode::Helping;
@@ -533,34 +423,6 @@ fn run_app<B: Backend>(terminal: &mut Terminal<B>, mut app: App) -> Result<TuiEv
                             _ => {}
                         }
                     }
-                    InputMode::FilteringPriority => {
-                        match key.code {
-                            KeyCode::Char('n') | KeyCode::Char(' ') => {
-                                app.priority_filter = None;
-                                app.update_filtered_tasks();
-                                app.input_mode = InputMode::Normal;
-                            }
-                            KeyCode::Char('l') => {
-                                app.priority_filter = Some(db::Priority::Low);
-                                app.update_filtered_tasks();
-                                app.input_mode = InputMode::Normal;
-                            }
-                            KeyCode::Char('m') => {
-                                app.priority_filter = Some(db::Priority::Medium);
-                                app.update_filtered_tasks();
-                                app.input_mode = InputMode::Normal;
-                            }
-                            KeyCode::Char('h') => {
-                                app.priority_filter = Some(db::Priority::High);
-                                app.update_filtered_tasks();
-                                app.input_mode = InputMode::Normal;
-                            }
-                            KeyCode::Esc => {
-                                app.input_mode = InputMode::Normal;
-                            }
-                            _ => {}
-                        }
-                    }
                 }
             }
         }
@@ -594,38 +456,25 @@ fn centered_rect(percent_x: u16, percent_y: u16, r: ratatui::layout::Rect) -> ra
 }
 
 fn ui(f: &mut Frame, app: &mut App) {
-    let chunks = Layout::default()
-        .direction(Direction::Vertical)
+    let main_chunks = Layout::default()
+        .direction(Direction::Horizontal)
         .margin(1)
         .constraints(
             [
-                Constraint::Min(0),
-                Constraint::Length(3),
+                Constraint::Percentage(50),
+                Constraint::Percentage(50),
             ]
             .as_ref(),
         )
         .split(f.size());
-
-    let main_chunks = Layout::default()
-        .direction(Direction::Horizontal)
-        .constraints(
-            [
-                Constraint::Percentage(50),
-                Constraint::Percentage(50),
-            ]
-            .as_ref(),
-        )
-        .split(chunks[0]);
 
     let tasks: Vec<ListItem> = app
         .filtered_tasks
         .iter()
         .map(|i| {
             let status = if i.is_done { "[v]" } else { "[ ]" };
-            let prio = i.priority.to_symbol();
-            let dep_warn = if utils::has_incomplete_dependencies(i, &app.tasks) { "*" } else { " " };
             
-            let content = format!("{:>2}: {} {} {} {}", i.id, status, prio, dep_warn, i.title);
+            let content = format!("{:>2}: {} {}", i.id, status, i.title);
             let style = if i.is_done {
                 Style::default().fg(Color::DarkGray)
             } else {
@@ -638,11 +487,9 @@ fn ui(f: &mut Frame, app: &mut App) {
 
     let tasks_list = List::new(tasks)
         .block(Block::default().borders(Borders::ALL).title(format!(
-            " タスク ({}) [ソート: {:?}] [フィルタ: タグ:{:?} 優先度:{:?}] ", 
-            if app.show_done { "すべて" } else { "実行中" },
-            app.sort_order,
-            app.tag_filter.as_ref().unwrap_or(&"なし".to_string()),
-            app.priority_filter
+            " Tasks ({}) [Filter: Tag:{}] ", 
+            if app.show_done { "All" } else { "Active" },
+            app.tag_filter.as_ref().unwrap_or(&"None".to_string()),
         )))
         .highlight_style(
             Style::default()
@@ -661,22 +508,13 @@ fn ui(f: &mut Frame, app: &mut App) {
     if let Some(i) = selected_index {
         if let Some(task) = app.filtered_tasks.get(i) {
             let mut details = Vec::new();
-            details.push(format!("タイトル: {}", task.title));
-            details.push(format!("優先度: {:?}", task.priority));
-            details.push(format!("タグ: {}", task.tags.join(", ")));
-            details.push(format!("完了: {}", if task.is_done { "はい" } else { "いいえ" }));
+            details.push(format!("Title: {}", task.title));
+            details.push(format!("Tags:  {}", task.tags.join(", ")));
             
             if let Some(limit) = task.limit {
-                details.push(format!("期限: {}", limit.with_timezone(&chrono::Local).format("%Y/%m/%d %H:%M")));
+                details.push(format!("Limit: {}", limit.with_timezone(&chrono::Local).format("%Y/%m/%d %H:%M")));
             } else {
-                details.push("期限: なし".to_string());
-            }
-
-            if !task.dependencies.is_empty() {
-                details.push(format!("Dependencies: {:?}", task.dependencies));
-                if utils::has_incomplete_dependencies(task, &app.tasks) {
-                    details.push("!! Pending dependencies exist !!".to_string());
-                }
+                details.push("Limit: None".to_string());
             }
 
             if let Some(desc) = &task.description {
@@ -694,19 +532,6 @@ fn ui(f: &mut Frame, app: &mut App) {
         f.render_widget(Paragraph::new("No task selected").block(detail_block), main_chunks[1]);
     }
 
-    let help_text = match app.input_mode {
-        InputMode::Normal => "j/k: 移動 | Space: 完了/未完了 | h: 完了表示切替 | a: 追加 | e: 編集 | r: 削除 | s: 提案 | o: ソート | f/p: フィルタ | ?: ヘルプ | q: 終了",
-        InputMode::Adding(_) | InputMode::Editing(_, _) => "Enter: 次へ/保存 | Esc: キャンセル | Backspace: 削除",
-        InputMode::Deleting(_) => "Enter: 削除確定 | Esc/n: キャンセル",
-        InputMode::FilteringTag => "Enter: タグフィルタ設定 | Esc: キャンセル",
-        InputMode::FilteringPriority => "l/m/h: フィルタ | Space/n: クリア | Esc: キャンセル",
-        InputMode::Helping => "Esc/?: 閉じる",
-    };
-
-    let help_msg = Paragraph::new(help_text)
-        .block(Block::default().borders(Borders::ALL).title(" ヘルプ "));
-    f.render_widget(help_msg, chunks[1]);
-
     // Popup for Add/Edit
     match &app.input_mode {
         InputMode::Adding(step) | InputMode::Editing(_, step) => {
@@ -718,13 +543,11 @@ fn ui(f: &mut Frame, app: &mut App) {
             };
             
             let (prompt, help) = match step {
-                PopupStep::Title => ("タイトル:", "(必須)"),
-                PopupStep::Priority => ("優先度:", "h/m/l または high/medium/low"),
-                PopupStep::Tags => ("タグ:", "カンマ区切り"),
-                PopupStep::Dependencies => ("依存ID:", "カンマ区切り数値"),
-                PopupStep::Date => ("日付:", "YYYY/MM/DD または MM/DD ( shortcuts: t, tm, 2d, 1w... )"),
-                PopupStep::Time => ("時刻:", "HH:MM ( shortcuts: last, noon, 1h... )"),
-                PopupStep::Description => ("詳細:", "(任意)"),
+                PopupStep::Title => ("Title:", "(Required)"),
+                PopupStep::Tags => ("Tags:", "Comma separated"),
+                PopupStep::Date => ("Date:", "YYYY/MM/DD or MM/DD ( shortcuts: t, tm, 2d, 1w... )"),
+                PopupStep::Time => ("Time:", "HH:MM ( shortcuts: last, noon, 1h... )"),
+                PopupStep::Description => ("Desc:", "(Optional)"),
             };
 
             let popup_block = Block::default()
@@ -749,11 +572,11 @@ fn ui(f: &mut Frame, app: &mut App) {
         InputMode::Deleting(_) => {
             let area = centered_rect(50, 15, f.size());
             let popup_block = Block::default()
-                .title(" 削除確認 ")
+                .title(" Confirm Delete ")
                 .borders(Borders::ALL)
                 .border_style(Style::default().fg(Color::Red));
             
-            let popup_text = Paragraph::new("\n  本当にこのタスクを削除しますか？\n\n  [Enter] 削除  [Esc/n] キャンセル")
+            let popup_text = Paragraph::new("\n  Are you sure you want to delete this task?\n\n  [Enter] Delete  [Esc/n] Cancel")
                 .block(popup_block)
                 .alignment(ratatui::layout::Alignment::Center);
             
@@ -762,48 +585,35 @@ fn ui(f: &mut Frame, app: &mut App) {
         }
         InputMode::FilteringTag => {
             let area = centered_rect(60, 20, f.size());
-            let block = Block::default().title(" タグでフィルタ ").borders(Borders::ALL);
+            let block = Block::default().title(" Filter by Tag ").borders(Borders::ALL);
             let text = Paragraph::new(app.input_buffer.as_str())
                 .block(block)
                 .style(Style::default().fg(Color::Yellow));
             f.render_widget(ratatui::widgets::Clear, area);
             f.render_widget(text, area);
         }
-        InputMode::FilteringPriority => {
-            let area = centered_rect(50, 20, f.size());
-            let block = Block::default().title(" 優先度でフィルタ ").borders(Borders::ALL);
-            let text = Paragraph::new("\n  [l] Low  [m] Medium  [h] High  [Space/n] クリア\n\n  [Esc] キャンセル")
-                .block(block)
-                .alignment(ratatui::layout::Alignment::Center);
-            f.render_widget(ratatui::widgets::Clear, area);
-            f.render_widget(text, area);
-        }
         InputMode::Helping => {
             let area = centered_rect(80, 80, f.size());
-            let block = Block::default().title(" 詳細ヘルプ ").borders(Borders::ALL).border_style(Style::default().fg(Color::Green));
+            let block = Block::default().title(" Detailed Help ").borders(Borders::ALL).border_style(Style::default().fg(Color::Green));
             let help_content = vec![
-                "=== 基本操作 ===",
-                "j/k or \u{2193}/\u{2191}: タスク選択",
-                "Space/Enter: 完了/未完了の切り替え",
-                "a: タスクの追加",
-                "e: タスクの編集",
-                "r: タスクの削除",
-                "o: ソート順の変更 (期限, 優先度, ID)",
-                "s: 次にやるべきタスクを提案",
-                "h: 完了済みタスクの表示/非表示",
-                "f: タグでフィルタリング",
-                "p: 優先度でフィルタリング",
-                "q/Esc: 終了",
+                "=== Basic Operations ===",
+                "j/k or \u{2193}/\u{2191}: Select Task",
+                "Space/Enter: Toggle Done/Todo",
+                "a: Add Task",
+                "e: Edit Task",
+                "r: Remove Task",
+                "h: Toggle Completed Visibility",
+                "f: Filter by Tag",
+                "q/Esc: Quit",
                 "",
-                "=== 入力形式 (追加/編集) ===",
-                "優先度: h (High), m (Medium), l (Low), None",
-                "日付: YYYY/MM/DD, MM/DD",
-                "      ショートカット: t (今日), tm (明日), 2d (2日後), 1w (1週間後)...",
-                "      曜日: mon, tue, wed, thu, fri, sat, sun",
-                "時刻: HH:MM",
-                "      ショートカット: last (23:59), noon (12:00), 1h (1時間後)...",
+                "=== Input Format (Add/Edit) ===",
+                "Date: YYYY/MM/DD, MM/DD",
+                "      Shortcuts: t (today), tm (tomorrow), 2d, 1w...",
+                "      Day: mon, tue, wed, thu, fri, sat, sun",
+                "Time: HH:MM",
+                "      Shortcuts: last (23:59), noon (12:00), 1h...",
                 "",
-                "[Esc/?: 閉じる]"
+                "[Esc/?: Close]"
             ];
             let text = Paragraph::new(help_content.join("\n"))
                 .block(block)

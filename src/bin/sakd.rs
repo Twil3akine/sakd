@@ -16,31 +16,16 @@ fn main() {
     });
 
     match cli.command {
-        Some(Commands::Add { title, limit, description, priority, tags, dep }) => {
+        Some(Commands::Add { title, limit, description, tags }) => {
             let title = title.unwrap_or_else(|| {
                 Text::new("Task title:").prompt().unwrap_or_else(|_| process::exit(0))
             });
             
-            let priority_val = if let Some(p) = priority {
-                utils::parse_priority(&p)
-            } else {
-                let options = vec![" ", "Low", "Medium", "High"];
-                let ans = Select::new("Priority:", options).prompt().unwrap_or(" ");
-                if ans == " " { db::Priority::None } else { utils::parse_priority(ans) }
-            };
-
             let tags_val = if let Some(t) = tags {
                 utils::parse_tags(&t)
             } else {
                 let ans = Text::new("Tags (comma separated):").prompt().unwrap_or_default();
                 utils::parse_tags(&ans)
-            };
-
-            let dep_val = if let Some(d) = dep {
-                d.split(',').filter_map(|s| s.trim().parse::<i64>().ok()).collect()
-            } else {
-                let ans = Text::new("Dependencies (comma separated IDs):").prompt().unwrap_or_default();
-                ans.split(',').filter_map(|s| s.trim().parse::<i64>().ok()).collect()
             };
 
             let limit_dt = if limit.is_some() {
@@ -56,7 +41,7 @@ fn main() {
                 if desc.is_empty() { None } else { Some(desc) }
             };
             
-            db::add_task(&conn, &title, limit_dt, description, priority_val, tags_val, dep_val).unwrap();
+            db::add_task(&conn, &title, limit_dt, description, tags_val).unwrap();
             println!("Task added: {}\n", title);
         }
         Some(Commands::Done { id }) => {
@@ -69,15 +54,11 @@ fn main() {
                 }
             }
         }
-        Some(Commands::List { all, tag, priority, order: _ }) => {
+        Some(Commands::List { all, tag }) => {
             let mut tasks = db::get_tasks(&conn).unwrap();
             
             if let Some(t) = tag {
                 tasks.retain(|task| task.tags.iter().any(|tag_str| tag_str.contains(&t)));
-            }
-            if let Some(p) = priority {
-                let p_val = utils::parse_priority(&p);
-                tasks.retain(|task| task.priority == p_val);
             }
 
             print_tasks(&tasks, all);
@@ -98,15 +79,7 @@ fn main() {
                 if let Some(task) = db::get_task(&conn, id).unwrap() {
                     println!("\n{}", "--- Task Details ---".cyan().bold());
                     println!("{}: {}", "ID".bold(), task.id);
-                    println!("{}: {}", "Priority".bold(), format!("{:?}", task.priority));
                     println!("{}: {}", "Tags".bold(), task.tags.join(", "));
-                    if !task.dependencies.is_empty() {
-                        println!("{}: {:?}", "Depends on".bold(), task.dependencies);
-                        let all_tasks = db::get_tasks(&conn).unwrap();
-                        if utils::has_incomplete_dependencies(&task, &all_tasks) {
-                            println!("{}", "Warning: Some dependencies are not completed!".yellow().bold());
-                        }
-                    }
                     println!("{}: {}", "Title".bold(), task.title);
                     println!("{}: {}", "Done".bold(), if task.is_done { "Yes".green() } else { "No".red() });
                     println!("{}: {}", "Limit".bold(), format_limit_color(task.limit));
@@ -152,9 +125,7 @@ fn main() {
                                 println!("\n{}", "--- Task Details ---".cyan().bold());
                                 println!("{}: {}", "ID".bold(), task.id);
                                 println!("{}: {}", "Title".bold(), task.title);
-                                println!("{}: {}", "Priority".bold(), format!("{:?}", task.priority));
                                 println!("{}: {}", "Tags".bold(), task.tags.join(", "));
-                                println!("{}: {}", "Dependencies".bold(), task.dependencies.iter().map(|id| id.to_string()).collect::<Vec<_>>().join(", "));
                                 println!("{}: {}", "Done".bold(), if task.is_done { "Yes".green() } else { "No".red() });
                                 println!("{}: {}", "Limit".bold(), format_limit_color(task.limit));
                                 println!("{}: {}", "Description".bold(), task.description.unwrap_or_else(|| "None".to_string()));
@@ -186,20 +157,13 @@ fn main() {
 fn interactive_add(conn: &rusqlite::Connection) {
     let title = Text::new("Task title:").prompt().unwrap_or_default();
     if !title.is_empty() {
-        let priority_options = vec![" ", "Low", "Medium", "High"];
-        let priority_ans = Select::new("Priority:", priority_options).prompt().unwrap_or(" ");
-        let priority = if priority_ans == " " { db::Priority::None } else { utils::parse_priority(priority_ans) };
-
         let tags_ans = Text::new("Tags (comma separated):").prompt().unwrap_or_default();
         let tags = utils::parse_tags(&tags_ans);
-
-        let dep_ans = Text::new("Dependencies (comma separated IDs):").prompt().unwrap_or_default();
-        let dependencies = dep_ans.split(',').filter_map(|s| s.trim().parse::<i64>().ok()).collect();
 
         let limit = prompt_limit(None);
         let desc = Text::new("Description:").prompt().unwrap_or_default();
         let description = if desc.is_empty() { None } else { Some(desc) };
-        db::add_task(conn, &title, limit, description, priority, tags, dependencies).unwrap();
+        db::add_task(conn, &title, limit, description, tags).unwrap();
         println!("Task added.");
     }
 }
@@ -208,22 +172,9 @@ fn interactive_edit(conn: &rusqlite::Connection, id: i64) {
     if let Some(mut task) = db::get_task(conn, id).unwrap() {
         task.title = Text::new("Title:").with_default(&task.title).prompt().unwrap_or(task.title);
         
-        let priority_options = vec![" ", "Low", "Medium", "High"];
-        let priority_ans = Select::new("Priority:", priority_options).with_starting_cursor(match task.priority {
-            db::Priority::None => 0,
-            db::Priority::Low => 1,
-            db::Priority::Medium => 2,
-            db::Priority::High => 3,
-        }).prompt().unwrap_or(" ");
-        task.priority = if priority_ans == " " { db::Priority::None } else { utils::parse_priority(priority_ans) };
-
         let tags_str = task.tags.join(", ");
         let tags_ans = Text::new("Tags (comma separated):").with_default(&tags_str).prompt().unwrap_or(tags_str);
         task.tags = utils::parse_tags(&tags_ans);
-
-        let dep_str = task.dependencies.iter().map(|id| id.to_string()).collect::<Vec<_>>().join(", ");
-        let dep_ans = Text::new("Dependencies (comma separated IDs):").with_default(&dep_str).prompt().unwrap_or(dep_str);
-        task.dependencies = dep_ans.split(',').filter_map(|s| s.trim().parse::<i64>().ok()).collect();
 
         task.limit = prompt_limit(task.limit);
         
@@ -312,25 +263,20 @@ fn pad_title(title: &str, width: usize) -> String {
 }
 
 fn print_tasks(tasks: &[db::Task], show_all: bool) {
-    let all_tasks = tasks.to_vec();
     if show_all {
-        println!("  st  P   {}  {}", pad_title("title", 25), "limit");
-        println!("------------------------------------------------------------");
+        println!("  st  {}  {}", pad_title("title", 25), "limit");
+        println!("--------------------------------------------------");
         for t in tasks {
             let status = if t.is_done { "v ".green() } else { "- ".red() };
-            let prio = t.priority.to_symbol();
             let limit = format_limit_color(t.limit);
-            let dep_warn = if utils::has_incomplete_dependencies(t, &all_tasks) { "*".yellow().bold() } else { " ".normal() };
-            println!("  {} {} {} {}  {}", status, prio, dep_warn, pad_title(&t.title, 25), limit);
+            println!("  {} {}  {}", status, pad_title(&t.title, 25), limit);
         }
     } else {
-        println!("  P   {}  {}", pad_title("title", 25), "limit");
-        println!("------------------------------------------------------------");
+        println!("  {}  {}", pad_title("title", 25), "limit");
+        println!("--------------------------------------------------");
         for t in tasks.iter().filter(|t| !t.is_done) {
-            let prio = t.priority.to_symbol();
             let limit = format_limit_color(t.limit);
-            let dep_warn = if utils::has_incomplete_dependencies(t, &all_tasks) { "*".yellow().bold() } else { " ".normal() };
-            println!("  {} {} {}  {}", prio, dep_warn, pad_title(&t.title, 25), limit);
+            println!("  {}  {}", pad_title(&t.title, 25), limit);
         }
     }
 }

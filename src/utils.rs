@@ -92,31 +92,11 @@ pub fn parse_full_date_time(date_str: &str, time_str: &str) -> Option<DateTime<U
     Local.from_local_datetime(&dt).single().map(|dt| dt.with_timezone(&Utc))
 }
 
-pub fn parse_priority(s: &str) -> crate::db::Priority {
-    match s.to_lowercase().as_str() {
-        "high" | "h" => crate::db::Priority::High,
-        "medium" | "m" => crate::db::Priority::Medium,
-        "low" | "l" => crate::db::Priority::Low,
-        _ => crate::db::Priority::None,
-    }
-}
-
 pub fn parse_tags(s: &str) -> Vec<String> {
     s.split(',')
         .map(|t| t.trim().to_string())
         .filter(|t| !t.is_empty())
         .collect()
-}
-
-pub fn has_incomplete_dependencies(task: &crate::db::Task, all_tasks: &[crate::db::Task]) -> bool {
-    for &dep_id in &task.dependencies {
-        if let Some(dep_task) = all_tasks.iter().find(|t| t.id == dep_id) {
-            if !dep_task.is_done {
-                return true;
-            }
-        }
-    }
-    false
 }
 
 #[cfg(test)]
@@ -143,19 +123,5 @@ mod tests {
         // Invalid format (-) should be None
         let dt = parse_full_date_time("2026-02-10", "12:00");
         assert!(dt.is_none());
-    }
-
-    #[test]
-    fn test_parse_priority() {
-        assert_eq!(parse_priority("h"), crate::db::Priority::High);
-        assert_eq!(parse_priority("high"), crate::db::Priority::High);
-        assert_eq!(parse_priority("m"), crate::db::Priority::Medium);
-        assert_eq!(parse_priority("medium"), crate::db::Priority::Medium);
-        assert_eq!(parse_priority("l"), crate::db::Priority::Low);
-        assert_eq!(parse_priority("low"), crate::db::Priority::Low);
-        
-        // 1-3 should be None
-        assert_eq!(parse_priority("1"), crate::db::Priority::None);
-        assert_eq!(parse_priority("3"), crate::db::Priority::None);
     }
 }
