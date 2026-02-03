@@ -195,7 +195,7 @@ impl<'a> App<'a> {
             self.popup_data = PopupData {
                 title: task.title.clone(),
                 tags: task.tags.join(", "),
-                date: task.limit.map(|l| l.with_timezone(&chrono::Local).format("%Y-%m-%d").to_string())
+                date: task.limit.map(|l| l.with_timezone(&chrono::Local).format("%Y/%m/%d").to_string())
                     .unwrap_or_default(),
                 time: task.limit.map(|l| l.with_timezone(&chrono::Local).format("%H:%M").to_string())
                     .unwrap_or_default(),
