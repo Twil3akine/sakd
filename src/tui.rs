@@ -487,7 +487,7 @@ fn ui(f: &mut Frame, app: &mut App) {
 
     let tasks_list = List::new(tasks)
         .block(Block::default().borders(Borders::ALL).title(format!(
-            " Tasks ({}) [Filter: Tag:{}] ", 
+            " Tasks ({}) [Filter: Tag:{}] (? for help) ", 
             if app.show_done { "All" } else { "Active" },
             app.tag_filter.as_ref().unwrap_or(&"None".to_string()),
         )))
